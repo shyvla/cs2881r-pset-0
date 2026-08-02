@@ -63,6 +63,47 @@ def parse_cond(cond: str) -> tuple[str, str]:
     return level, state
 
 
+def unpack_cond(spec) -> tuple[bool, str, str]:
+    """A condition spec is (thinking, suffix) or (thinking, suffix, prefill).
+
+    `prefill` is text appended to the rendered chat template, so generation
+    STARTS inside it. That is what makes the direct condition direct by
+    construction: with prefill=r"\\boxed{" the first generated token is the
+    answer, so there is no room for the model to externalise its reasoning.
+
+    This matters beyond prompt hygiene. Asking a 4B model not to reason is
+    instruction-following, and compliance degrades as problems get harder --
+    which is the SAME axis as the research question, so leakage would be
+    inseparable from a real difficulty effect. Prefilling is mechanical, so
+    its compliance does not vary with difficulty.
+    """
+    if len(spec) == 2:
+        thinking, suffix = spec
+        prefill = ""
+    elif len(spec) == 3:
+        thinking, suffix, prefill = spec
+    else:
+        raise ValueError(
+            f"condition spec must be (thinking, suffix) or "
+            f"(thinking, suffix, prefill), got {len(spec)} items: {spec!r}")
+    return bool(thinking), suffix, prefill
+
+
+def render_prompt(tokenizer, question: str, thinking: bool, suffix: str = "",
+                  prefill: str = "") -> str:
+    """The ONE place a prompt is built. Generation and fingerprinting both
+    call this, so the hash in the manifest cannot drift from what was run.
+
+    Prompt construction used to be copy-pasted into every notebook cell,
+    which is the precise failure prompt_fingerprint was added to detect --
+    and a fingerprint computed by different code than the run is worthless.
+    """
+    return tokenizer.apply_chat_template(
+        [{"role": "user", "content": question + suffix}],
+        tokenize=False, add_generation_prompt=True,
+        enable_thinking=thinking) + prefill
+
+
 # ============================================================== layer 1
 # Model-side text handling. Shared by all datasets: this is about Qwen's
 # output conventions, not about the answer space.
@@ -352,17 +393,22 @@ def _git_commit():
         return None
 
 
-def prompt_fingerprint(tokenizer, thinking: bool, suffix: str = "") -> str:
+def prompt_fingerprint(tokenizer, thinking: bool, suffix: str = "",
+                       prefill: str = "") -> str:
     """Hash of the EXACT rendered prompt template for a canonical probe.
 
     Protects against the unanswerable question "did I change the direct
     instruction wording halfway through the run?". If the hash in your run
     manifest differs between two runs, the prompts differed. Full stop.
+
+    `prefill` is part of the prompt, so it is part of the hash. Without it,
+    the direct condition with and without r"\\boxed{" would fingerprint
+    identically -- the manifest would show no change across the single most
+    important prompt revision in this experiment.
     """
-    text = tokenizer.apply_chat_template(
-        [{"role": "user", "content": "PROBE" + suffix}],
-        tokenize=False, add_generation_prompt=True, enable_thinking=thinking)
-    return hashlib.sha256(text.encode()).hexdigest()[:16]
+    return hashlib.sha256(
+        render_prompt(tokenizer, "PROBE", thinking, suffix, prefill)
+        .encode()).hexdigest()[:16]
 
 
 def provenance(tokenizer=None, conditions: dict | None = None,
@@ -370,13 +416,16 @@ def provenance(tokenizer=None, conditions: dict | None = None,
                model_name: str | None = None,
                model_revision: str | None = None,
                seed: int | None = None,
-               caps: dict | None = None) -> dict:
+               caps: dict | None = None,
+               gen_config: dict | None = None) -> dict:
     """Everything needed to reproduce a run. Write this next to the results.
 
-    `conditions` maps condition name -> (thinking: bool, suffix: str), which
-    is exactly what determines the prompt, so we hash each one. `caps` is
-    recorded because max_new_tokens per condition is part of the design, not
-    an implementation detail -- see analysis.cap_warnings (FIX 5).
+    `conditions` maps name -> (thinking, suffix) or (thinking, suffix,
+    prefill), which is exactly what determines the prompt, so we hash each
+    one and also record the parts in the clear. `caps` and `gen_config` are
+    recorded because max_new_tokens and the sampling settings are part of
+    the design, not implementation details -- Qwen3 ships do_sample=True, so
+    "was this greedy?" must be answerable from the manifest.
     """
     prov = {
         "model": model_name,
@@ -389,13 +438,19 @@ def provenance(tokenizer=None, conditions: dict | None = None,
         "parse_kw": dict(PARSE_KW),
         "verify_kw": dict(VERIFY_KW),
         "caps": dict(caps) if caps else {},
+        "gen_config": dict(gen_config) if gen_config else {},
         "dataset_fingerprints": dataset_fingerprints or {},
     }
-    if tokenizer is not None and conditions:
-        prov["prompt_fingerprints"] = {
-            name: prompt_fingerprint(tokenizer, thinking, suffix)
-            for name, (thinking, suffix) in conditions.items()
-        }
+    if conditions:
+        prov["conditions"] = {}
+        for name, spec in conditions.items():
+            thinking, suffix, prefill = unpack_cond(spec)
+            entry = {"thinking": thinking, "suffix": suffix,
+                     "prefill": prefill}
+            if tokenizer is not None:
+                entry["prompt_fingerprint"] = prompt_fingerprint(
+                    tokenizer, thinking, suffix, prefill)
+            prov["conditions"][name] = entry
     return prov
 
 
@@ -421,7 +476,7 @@ def score_file(gen_path: str, scores_path: str, conditions: dict,
     with open(gen_path) as f:
         for line in f:
             r = json.loads(line)
-            thinking = conditions[r["cond"]][0]
+            thinking = unpack_cond(conditions[r["cond"]])[0]
             try:
                 d = score_detail(r["raw"], r["gold"], r["hit_cap"], thinking)
             except Exception as e:

@@ -437,6 +437,14 @@ def baseline_table(records, conditions):
         if r["unparsed"] / max(r["n"], 1) > 0.05:
             print(f"  EXTRACTION WARNING: {cond} is {r['unparsed']}/{r['n']} "
                   f"unparsed -- hand-read these before trusting the accuracy")
+        # An all-incomplete cell is a termination failure, not a reasoning
+        # failure, and the two support very different claims. Without this the
+        # only signal was cap%, which stays 0 when generation stops early for
+        # some other reason (e.g. a thinking trace that never closes).
+        if r["incomplete"] / max(r["n"], 1) > 0.05:
+            print(f"  TERMINATION WARNING: {cond} is {r['incomplete']}/{r['n']} "
+                  f"incomplete -- check whether the cap binds (cap%) or the "
+                  f"trace never closes </think>")
     # sanity: every condition must be on the grid, so a typo cannot survive
     for cond in conditions:
         parse_cond(cond)

@@ -1,7 +1,12 @@
 """Test suite for scoring.py. Run: python test_scoring.py"""
+import sys
+
+VERBOSE = "--quiet" not in sys.argv
+
 from scoring import (DEGENERATE_BELOW, cond_name, distinct_ngram_ratio,
-                     parse_cond, prompt_fingerprint, provenance, score,
-                     score_detail, strip_think, think_trace, unwrap_markdown)
+                     parse_cond, prompt_fingerprint, provenance, render_prompt,
+                     score, score_detail, strip_think, think_trace,
+                     unpack_cond, unwrap_markdown)
 
 # (raw, gold, hit_cap, thinking, expected)
 TESTS = [
@@ -89,15 +94,26 @@ TESTS = [
 
 
 def test_scoring():
-    ok = True
+    """Every case is printed before the assert fires, so a failing run still
+    shows the full table rather than stopping at the first bad case.
+
+    The assert is load-bearing: this function used to accumulate into `ok`
+    and RETURN it, which pytest ignores. A deliberately broken scorer (FIX 2
+    reverted) produced "8 passed" under pytest while `python test_scoring.py`
+    correctly exited 1 -- so a CI job wired to pytest would have been green
+    on a broken scorer.
+    """
+    fails = []
     for raw, gold, cap, think, want in TESTS:
         got, extracted = score(raw, gold, cap, think)
         good = got == want
-        ok &= good
-        print(f"{'ok  ' if good else 'FAIL'} think={int(think)} cap={int(cap)} "
-              f"want={want:10} got={got:10} ext={extracted!r:10} "
-              f"<- {raw[:40]!r}")
-    return ok
+        if not good:
+            fails.append((raw[:50], want, got))
+        if VERBOSE or not good:
+            print(f"{'ok  ' if good else 'FAIL'} think={int(think)} "
+                  f"cap={int(cap)} want={want:10} got={got:10} "
+                  f"ext={extracted!r:10} <- {raw[:40]!r}")
+    assert not fails, f"{len(fails)} scoring case(s) failed: {fails}"
 
 
 def test_strip_think():
@@ -108,7 +124,6 @@ def test_strip_think():
     assert strip_think("b<|im_end|><|im_start|>assistant\nc") == "b"
     assert strip_think("b<|endoftext|>junk") == "b"
     print("ok   strip_think")
-    return True
 
 
 def test_think_trace():
@@ -119,7 +134,6 @@ def test_think_trace():
     assert think_trace("abc</think>\n\nans") == "abc"
     assert think_trace("no trace at all") == ""
     print("ok   think_trace")
-    return True
 
 
 def test_unwrap_markdown():
@@ -130,7 +144,6 @@ def test_unwrap_markdown():
     # must not eat asterisks used as multiplication
     assert unwrap_markdown("2*3 and 4*5") == "2*3 and 4*5"
     print("ok   unwrap_markdown")
-    return True
 
 
 def test_normalisation_is_fallback_only():
@@ -144,7 +157,6 @@ def test_normalisation_is_fallback_only():
     assert score_detail(r"\boxed{72}", "72", False, False)["normalized"] is False
     assert score_detail("**72**", "72", False, False)["normalized"] is True
     print("ok   normalisation is fallback-only")
-    return True
 
 
 def test_degeneracy():
@@ -162,7 +174,6 @@ def test_degeneracy():
     print(f"ok   degeneracy  clean={distinct_ngram_ratio(clean):.2f} "
           f"loop={distinct_ngram_ratio(loop):.2f} "
           f"cot(body={body_ratio:.2f} trace={trace_ratio:.2f})")
-    return True
 
 
 def test_cond_names():
@@ -182,7 +193,6 @@ def test_cond_names():
             continue
         raise AssertionError(f"cond_name{bad_call} should have raised")
     print("ok   condition naming grid")
-    return True
 
 
 class _StubTok:
@@ -194,29 +204,81 @@ class _StubTok:
                f"<|im_start|>assistant\n{think}"
 
 
+def test_unpack_cond():
+    """Condition specs may carry a prefill; both shapes must work."""
+    assert unpack_cond((True, "")) == (True, "", "")
+    assert unpack_cond((False, "S", "\\boxed{")) == (False, "S", "\\boxed{")
+    for bad in ((True,), (True, "", "", "")):
+        try:
+            unpack_cond(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"unpack_cond{bad} should have raised")
+    print("ok   unpack_cond")
+
+
+def test_render_prompt_and_prefill():
+    """The prefill is part of the prompt, so it must be part of the hash.
+
+    Without this, the direct condition with and without \\boxed{ would
+    fingerprint identically -- the manifest would record no change across
+    the single most important prompt revision in the experiment.
+    """
+    tok = _StubTok()
+    plain = render_prompt(tok, "Q", False, "\n\nAnswer only.")
+    boxed = render_prompt(tok, "Q", False, "\n\nAnswer only.", "\\boxed{")
+    assert boxed == plain + "\\boxed{", boxed
+    assert prompt_fingerprint(tok, False, "\n\nAnswer only.") != \
+           prompt_fingerprint(tok, False, "\n\nAnswer only.", "\\boxed{")
+    print("ok   render_prompt + prefill changes the fingerprint")
+
+
 def test_provenance():
     tok = _StubTok()
     conds = {"cot_intact": (True, ""),
-             "direct_intact": (False, "\n\nAnswer only.")}
+             "direct_intact": (False, "\n\nAnswer only.", "\\boxed{")}
     p = provenance(tokenizer=tok, conditions=conds, model_name="Qwen/Qwen3-4B",
-                   seed=0, caps={"cot_intact": 2048, "direct_intact": 256})
-    fps = p["prompt_fingerprints"]
-    assert len(fps) == 2 and fps["cot_intact"] != fps["direct_intact"]
+                   seed=0, caps={"cot_intact": 2048, "direct_intact": 32},
+                   gen_config={"do_sample": False})
+    c = p["conditions"]
+    assert len(c) == 2
+    assert c["direct_intact"]["prefill"] == "\\boxed{"
+    assert c["cot_intact"]["prompt_fingerprint"] != \
+           c["direct_intact"]["prompt_fingerprint"]
     # a changed suffix must change the hash -- that is the whole point
     assert prompt_fingerprint(tok, False, "\n\nAnswer only.") != \
            prompt_fingerprint(tok, False, "\n\nAnswer ONLY.")
     assert p["versions"]["math-verify"] is not None
-    assert p["caps"]["direct_intact"] == 256       # caps are part of design
+    assert p["caps"]["direct_intact"] == 32
+    assert p["gen_config"]["do_sample"] is False   # Qwen3 defaults to True
     print(f"ok   provenance  math-verify={p['versions']['math-verify']} "
-          f"git={p['git_commit']} fingerprints={fps}")
-    return True
+          f"git={p['git_commit']}")
+
+
+def _run_all():
+    # An assertion anywhere below propagates and exits non-zero on its own,
+    # so this behaves identically under `python test_scoring.py` and pytest.
+    test_scoring()
+    test_strip_think()
+    test_think_trace()
+    test_unwrap_markdown()
+    test_normalisation_is_fallback_only()
+    test_degeneracy()
+    test_cond_names()
+    test_unpack_cond()
+    test_render_prompt_and_prefill()
+    test_provenance()
+    print(f"\nALL PASS ({len(TESTS)} scoring cases + 9 unit tests)")
 
 
 if __name__ == "__main__":
-    import sys
-    res = [test_scoring(), test_strip_think(), test_think_trace(),
-           test_unwrap_markdown(), test_normalisation_is_fallback_only(),
-           test_degeneracy(), test_cond_names(), test_provenance()]
-    print(f"\n{'ALL PASS' if all(res) else 'FAILURES PRESENT'} "
-          f"({len(TESTS)} scoring cases + 7 unit tests)")
-    sys.exit(0 if all(res) else 1)
+    import os
+
+    # `--quiet` suppresses the per-case table; failures still print.
+    # The BrokenPipeError guard makes `... | head -N` safe: head closes the
+    # pipe on exit and the next print would otherwise raise.
+    try:
+        _run_all()
+        sys.stdout.flush()
+    except BrokenPipeError:
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())

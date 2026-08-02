@@ -45,7 +45,6 @@ def test_mcnemar_hand():
     # exact two-sided binomial, n=5, k=min=2: 2*(C(5,0)+C(5,1)+C(5,2))/32
     assert abs(r["p"] - 2 * (1 + 5 + 10) / 32) < 1e-12, r
     print(f"ok   mcnemar exact  b=3 c=2 p={r['p']:.4f}")
-    return True
 
 
 def test_recovery():
@@ -57,7 +56,6 @@ def test_recovery():
     assert err < 0.03, (bs["point"], truth)
     print(f"ok   recovery       truth={truth:+.0%} est={bs['point']:+.1%} "
           f"err={err:.3f} (n=4000)")
-    return True
 
 
 def test_coverage(n=100, trials=300):
@@ -74,7 +72,6 @@ def test_coverage(n=100, trials=300):
     assert 0.90 <= cov <= 0.99, cov
     print(f"ok   coverage       {cov:.0%} of 95% CIs contain truth "
           f"(n={n}, mean width {widths/trials:.0%})")
-    return True
 
 
 def test_false_positive(n=100, trials=300):
@@ -88,7 +85,6 @@ def test_false_positive(n=100, trials=300):
     rate = fp / trials
     assert rate < 0.12, rate
     print(f"ok   false positive  {rate:.0%} when true interaction is 0")
-    return True
 
 
 def test_complete_cases():
@@ -100,7 +96,6 @@ def test_complete_cases():
     assert all(len(v) == 8 for v in mat.values())
     assert dropped["direct_intact"] == [3, 7]
     print(f"ok   complete cases  paired on {len(ids)}/10, dropped {[3, 7]}")
-    return True
 
 
 # ==================================================== FIX 8: loud failure
@@ -119,7 +114,7 @@ def test_empty_cell_raises():
     except ValueError as e:
         assert "cot_ablated" in str(e), e
         print("ok   empty cell     raises instead of returning a NaN null")
-        return True
+        return
     raise AssertionError("to_matrix silently accepted an empty cell")
 
 
@@ -135,7 +130,7 @@ def test_no_overlap_raises():
     except ValueError as e:
         assert "paired" in str(e), e
         print("ok   no overlap     raises instead of pairing on nothing")
-        return True
+        return
     raise AssertionError("to_matrix accepted non-overlapping ids")
 
 
@@ -163,7 +158,6 @@ def test_cell_table_complete_cases():
           f"{all_rows['direct_intact']['acc']:.0%} vs paired "
           f"{paired_rows['direct_intact']['acc']:.0%}; report now prints the "
           f"paired one")
-    return True
 
 
 # ==================================================== minor fixes
@@ -174,7 +168,6 @@ def test_p_floor():
     bs = paired_bootstrap(mat, n_boot=10000)
     assert bs["p_at_floor"] and bs["p"] == 1 / 10001, bs
     print(f"ok   p floor        p={bs['p']:.2e} flagged, not printed as 0.000")
-    return True
 
 
 def test_cap_warnings():
@@ -187,7 +180,6 @@ def test_cap_warnings():
     assert any("direct" in w and "cap rate differs" in w for w in warns), warns
     assert not cap_warnings(cell_table(synth(200, P_EFFECT))), "false alarm"
     print(f"ok   cap warnings   {len(warns)} raised on a 30% direct-only cap")
-    return True
 
 
 def test_duplicate_records_raise():
@@ -204,7 +196,7 @@ def test_duplicate_records_raise():
     except ValueError as e:
         assert "duplicate" in str(e), e
         print("ok   duplicates    raise instead of last-write-wins")
-        return True
+        return
     raise AssertionError("to_matrix accepted a duplicate (cond, id)")
 
 
@@ -215,18 +207,26 @@ def test_observed_rho():
         assert abs(got - target) < 0.06, (target, got)
         print(f"       rho: target={target:.2f} measured={got:.3f}")
     print("ok   observed_rho    recovers the correlation power.py assumes")
-    return True
 
 
-if __name__ == "__main__":
-    import sys
-    res = [test_mcnemar_hand(), test_recovery(), test_coverage(),
-           test_false_positive(), test_complete_cases(),
-           test_empty_cell_raises(), test_no_overlap_raises(),
-           test_cell_table_complete_cases(), test_p_floor(),
-           test_cap_warnings(), test_duplicate_records_raise(),
-           test_observed_rho()]
-    print(f"\n{'ALL PASS' if all(res) else 'FAILURES PRESENT'}\n")
+def _run_all(demos=True):
+    # Assertions propagate and exit non-zero on their own, so this behaves
+    # identically under `python test_analysis.py` and under pytest.
+    test_mcnemar_hand()
+    test_recovery()
+    test_coverage()
+    test_false_positive()
+    test_complete_cases()
+    test_empty_cell_raises()
+    test_no_overlap_raises()
+    test_cell_table_complete_cases()
+    test_p_floor()
+    test_cap_warnings()
+    test_duplicate_records_raise()
+    test_observed_rho()
+    print("\nALL PASS\n")
+    if not demos:
+        return
 
     print("=" * 78)
     print("DEMO: realistic n=100 run, true interaction +20%")
@@ -259,4 +259,21 @@ if __name__ == "__main__":
                             rng=rng, cells=CELLS_RANDOM_CONTROL)
            if r["cond"].endswith("_random")]
     report_with_control(main_cells + rnd)
-    sys.exit(0 if all(res) else 1)
+
+
+if __name__ == "__main__":
+    import os
+    import sys
+
+    # `--no-demo` runs the assertions only. Use it when piping or when you
+    # just want the pass/fail line.
+    #
+    # The BrokenPipeError guard exists because `python test_analysis.py |
+    # head -18` kills this process mid-print: head exits after 18 lines and
+    # closes the pipe. (`tail` reads to EOF, so it never triggers this --
+    # which is why piping to tail looked fine and piping to head did not.)
+    try:
+        _run_all(demos="--no-demo" not in sys.argv)
+        sys.stdout.flush()
+    except BrokenPipeError:
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
