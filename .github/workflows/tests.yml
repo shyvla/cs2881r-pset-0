@@ -1,0 +1,60 @@
+name: tests
+
+# A tripwire on the model contract, not just a test run.
+#
+# hooks.py encodes five properties of transformers 5.14.1 that are NOT
+# properties of transformers in general -- the decoder layer returning a bare
+# tensor, hidden-state capture being itself hook-based, hook firing order
+# making output_hidden_states report PRE-intervention activations, and so on.
+# test_hooks.py pins all five against a randomly initialised Qwen3 built from
+# config: no weights, no download, no GPU, a few seconds. So a dependency bump
+# that would silently change what the ablation does turns this job red
+# instead.
+#
+# That is unusual for interpretability code, which normally cannot be unit
+# tested at all, and it is the reason the pins in requirements.txt are exact.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --index-url https://download.pytorch.org/whl/cpu torch==2.13.0
+          pip install -r requirements.txt
+
+      - name: Report versions
+        run: |
+          python -c "from importlib.metadata import version; \
+            [print(f'{p}=={version(p)}') for p in \
+             ('torch','transformers','datasets','math-verify','sympy','numpy')]"
+
+      - name: hooks contract (no weights, no GPU)
+        working-directory: sandbox
+        run: python test_hooks.py
+
+      - name: full suite
+        working-directory: sandbox
+        run: python -m pytest -q
+
+      - name: weightless probe smoke tests
+        working-directory: sandbox
+        run: |
+          python m7_calibration.py --tiny
+          python m7_directions.py --tiny
+          python m7_cot_exposure.py --tiny
+          python m7_damage_floor.py --tiny
+          python m8_run.py --tiny --n 1 --smoke-cap 8 --out runs/ci_m8.jsonl

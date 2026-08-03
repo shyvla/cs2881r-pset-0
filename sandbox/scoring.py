@@ -393,6 +393,57 @@ def _git_commit():
         return None
 
 
+def model_revision(model_or_config) -> str | None:
+    """The resolved Hub commit for the checkpoint that is actually loaded.
+
+    "Qwen/Qwen3-4B" is a moving target: it names a branch, not a snapshot. The
+    assignment asks for exact dataset and model versions, and the GPU run
+    spans ~6 cells over hours that may straddle an instance restart, so a
+    checkpoint resolving differently between the first cell and the last is a
+    confound with no signature anywhere in the data.
+
+    Read from the loaded object rather than queried from the Hub, because the
+    question is which weights ran, not which are current. Resolve it BEFORE
+    the first generation, not after the last.
+    """
+    cfg = getattr(model_or_config, "config", model_or_config)
+    return getattr(cfg, "_commit_hash", None)
+
+
+def dataset_fingerprint(ds, ids=None, **extra) -> dict:
+    """Identify the data a run used, strongly enough to detect a swap.
+
+    Three layers, because each catches something the others miss:
+
+      rows        the split's length. Catches a different split or a version
+                  that added or removed problems.
+      fingerprint the datasets library's own hash of the loaded table. Cheap
+                  and exact, but a PRIVATE attribute -- fine only because
+                  datasets is pinned exactly, and it degrades to None rather
+                  than raising if the attribute moves.
+      content     sha256 over the rows the run actually touched. The
+                  definitive one: two releases can share a row count and
+                  differ in a problem statement, and this is what would
+                  notice. Restricted to `ids` because those are the only rows
+                  the result depends on, which also keeps it fast on large
+                  splits.
+    """
+    out = {"rows": int(ds.num_rows),
+           "fingerprint": getattr(ds, "_fingerprint", None),
+           "download_size": getattr(getattr(ds, "info", None),
+                                    "download_size", None)}
+    out.update(extra)
+    if ids is not None:
+        ids = sorted(int(i) for i in ids)
+        h = hashlib.sha256()
+        for i in ids:
+            h.update(json.dumps(ds[i], sort_keys=True,
+                                ensure_ascii=False).encode())
+        out["ids"] = ids
+        out["content_sha256"] = h.hexdigest()[:16]
+    return out
+
+
 def prompt_fingerprint(tokenizer, thinking: bool, suffix: str = "",
                        prefill: str = "") -> str:
     """Hash of the EXACT rendered prompt template for a canonical probe.
