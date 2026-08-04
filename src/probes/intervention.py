@@ -25,7 +25,7 @@ import config
 from hooks import (Capture, Intervene, add_noise, band_from_depth,
                    hook_census, n_layers)
 
-MODEL = "Qwen/Qwen3-4B"
+from loaders import MODEL
 # The one definition, from config. GSM8K-only probe, so it names the dataset.
 DIRECT_SUFFIX, DIRECT_PREFILL = config.direct_prompt("gsm8k")
 # GSM8K test id 733: direct-correct AND cot-correct in 630 tokens, nothink in

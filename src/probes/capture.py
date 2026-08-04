@@ -19,7 +19,7 @@ import config
 from hooks import (Capture, band_from_depth, decoder_layers, final_norm,
                    hook_census, logit_lens, n_layers)
 
-MODEL = "Qwen/Qwen3-4B"
+from loaders import MODEL
 # Must match runs/gsm8k_manifest.json -> conditions.direct_intact, or the
 # probe is measuring a condition that never ran. That is now enforced by
 # construction rather than by a copied string: config owns the one definition,

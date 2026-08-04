@@ -43,18 +43,18 @@ jobs:
              ('torch','transformers','datasets','math-verify','sympy','numpy')]"
 
       - name: hooks contract (no weights, no GPU)
-        working-directory: sandbox
-        run: python test_hooks.py
+        working-directory: src
+        run: python -m tests.test_hooks
 
       - name: full suite
-        working-directory: sandbox
+        working-directory: src
         run: python -m pytest -q
 
       - name: weightless probe smoke tests
-        working-directory: sandbox
+        working-directory: src
         run: |
-          python m7_calibration.py --tiny
-          python m7_directions.py --tiny
-          python m7_cot_exposure.py --tiny
-          python m7_damage_floor.py --tiny
-          python m8_run.py --tiny --n 1 --smoke-cap 8 --out runs/ci_m8.jsonl
+          python -m probes.calibrate --tiny
+          python -m probes.directions --tiny
+          python -m probes.exclusion --tiny
+          python -m probes.damage_floor --tiny
+          python run.py --tiny --n 1 --smoke-cap 8 --out "$RUNNER_TEMP/ci_smoke.jsonl"

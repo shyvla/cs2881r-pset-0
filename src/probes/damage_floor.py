@@ -51,7 +51,8 @@ import torch
 
 import config
 from hooks import Intervene, make_ablation, n_layers, resolve_band
-from m7_calibration import load_real, load_tiny, mcnemar, wilson
+from loaders import load_real, load_tiny
+from probes.calibrate import mcnemar, wilson
 
 SST2_SUFFIX = ("\n\nIs the sentiment of this sentence positive or negative? "
                "Answer with one word.")

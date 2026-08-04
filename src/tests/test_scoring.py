@@ -272,13 +272,17 @@ def test_question_field_resolves_or_names_the_keys_it_found():
 
 
 def test_run_path_is_the_one_filename_construction():
-    """m8_run writes it and m8_analyze must find it. Built twice, they
-    eventually disagree and the analysis reads a different run."""
+    """run.py writes it and analyze.py must find it. Built twice, they
+    eventually disagree and the analysis reads a different run.
+
+    Superseded runs made under the older m8_-prefixed convention live in
+    runs/archive/ under their original names; analyze.py reads them via
+    --file."""
     from scoring import run_path
     assert run_path("gsm8k", 150, "light") == \
-           "runs/m8_gsm8k_n150_light.jsonl"          # the committed run
+           "runs/gsm8k_n150_light.jsonl"
     assert run_path("math500", 500, "light") == \
-           "runs/m8_math500_n500_light.jsonl"
+           "runs/math500_n500_light.jsonl"
     assert "(" not in run_path("gsm8k", 12, "range14, 20")
     print("ok   run_path")
 

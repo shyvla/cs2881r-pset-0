@@ -43,11 +43,11 @@ import config
 from hooks import (Capture, Intervene, band_from_depth, directions_for,
                    make_ablation, n_layers, project_out, resolve_band,
                    topk_tokens)
+from loaders import MODEL, load_real, load_tiny
 
-MODEL = "Qwen/Qwen3-4B"
 # From config, not a fourth copy of the string. These probes are GSM8K-only
-# measurements, so they ask for the GSM8K prompt explicitly. m7_directions
-# imports both names from here, which is why they stay module-level.
+# measurements, so they ask for the GSM8K prompt explicitly. The directions
+# probe imports both names from here, which is why they stay module-level.
 DIRECT_SUFFIX, DIRECT_PREFILL = config.direct_prompt("gsm8k")
 
 # Measured in Milestone 6 on the real model, LIGHT band, direct prompt.
@@ -85,33 +85,6 @@ def mcnemar(b, c):
         return 1.0
     tail = sum(math.comb(n, i) for i in range(min(b, c) + 1)) / 2 ** n
     return min(1.0, 2 * tail)
-
-
-def load_real(device):
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-    tok = AutoTokenizer.from_pretrained(MODEL)
-    m = AutoModelForCausalLM.from_pretrained(
-        MODEL, dtype=torch.bfloat16).to(device).eval()
-    m.generation_config.do_sample = False
-    m.generation_config.temperature = None
-    m.generation_config.top_p = m.generation_config.top_k = None
-    return m, tok
-
-
-def load_tiny(device):
-    from transformers import Qwen3Config, Qwen3ForCausalLM
-    torch.manual_seed(0)
-    cfg = Qwen3Config(vocab_size=256, hidden_size=64, intermediate_size=128,
-                      num_hidden_layers=36, num_attention_heads=4,
-                      num_key_value_heads=2, head_dim=16,
-                      max_position_embeddings=4096, pad_token_id=0)
-    m = Qwen3ForCausalLM(cfg).to(device).eval()
-    g = torch.Generator().manual_seed(7)
-    with torch.no_grad():                       # trained models have a real gain
-        m.model.norm.weight.copy_(
-            torch.rand(cfg.hidden_size, generator=g) * 2 + 0.25)
-    m.generation_config.do_sample = False
-    return m, None
 
 
 def main(argv=None):

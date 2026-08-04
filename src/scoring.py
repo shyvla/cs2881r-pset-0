@@ -442,7 +442,7 @@ def run_path(dataset: str, n: int, band: str) -> str:
     writes it and m8_analyze.py has to find it, and a filename built twice is
     a filename that eventually disagrees -- with the analysis silently reading
     a different run than the one just produced."""
-    return f"runs/m8_{dataset}_n{n}_{band}.jsonl".replace("(", "").replace(
+    return f"runs/{dataset}_n{n}_{band}.jsonl".replace("(", "").replace(
         ")", "")
 
 

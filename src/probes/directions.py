@@ -56,7 +56,8 @@ import torch
 import config
 from hooks import (Capture, band_from_depth, directions_for, n_layers,
                    topk_tokens)
-from m7_calibration import DIRECT_PREFILL, DIRECT_SUFFIX, load_real, load_tiny
+from loaders import load_real, load_tiny
+from probes.calibrate import DIRECT_PREFILL, DIRECT_SUFFIX
 
 
 def spectrum(V):

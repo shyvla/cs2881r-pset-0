@@ -46,7 +46,7 @@ import torch
 
 import config
 from hooks import Capture, n_layers, resolve_band, topk_tokens
-from m7_calibration import load_real, load_tiny
+from loaders import load_real, load_tiny
 
 BASELINE = "runs/gsm8k_baseline.jsonl"
 # Milestone 7 step 1, direct condition, PREFILL positions, band 14-19. The

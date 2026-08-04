@@ -58,7 +58,7 @@ import torch
 
 import config
 from hooks import make_ablation, n_layers, resolve_band
-from m7_calibration import load_real, load_tiny
+from loaders import load_real, load_tiny
 
 def conditions(dataset: str):
     """The six cells, as {name: (thinking, suffix, prefill, kind)}.
