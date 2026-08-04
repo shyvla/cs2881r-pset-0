@@ -6,13 +6,13 @@ WHY THIS FILE EXISTS
 no test could reach it, a change to it produced no reviewable diff, and the
 value recorded in the run manifest came from a notebook cell rather than from
 anything under version control. The same was true of the k values and the
-layer bands, which existed only as prose in the handoff document.
+layer bands, which existed only as prose in planning notes outside the repo.
 
 Everything here is a number that must be fixed BEFORE ablated data is seen,
 and recorded in the manifest afterwards. Keeping them in one importable module
-is the same discipline as decision 17 (condition names come from a grid, never
-hand-typed): a constant that is written twice can drift, and drift here is
-silent.
+is the same discipline as condition naming (names come from a grid in
+scoring.py, never hand-typed): a constant that is written twice can drift,
+and drift here is silent.
 
 UNDECIDED values are None, and the accessor for each raises. A pre-registration
 choice cannot then be made accidentally at the keyboard -- the code stops.
@@ -48,9 +48,9 @@ def problem_ids(n: int, dataset_size: int, seed: int = SEED) -> list[int]:
     A 1.26x margin on a CPython implementation detail is not a foundation for
     the comparability of every number in the report.
 
-    NOTE: this returns DIFFERENT ids than the Milestone 4 run, which used
-    random.sample. That is free now, because M4 is pilot data being re-run at
-    n=150, and expensive later.
+    NOTE: this returns DIFFERENT ids than the n=20 baseline run, which used
+    random.sample. That is free now, because the baseline is pilot data being
+    re-run at n=150, and expensive later.
     """
     if n > dataset_size:
         raise ValueError(f"asked for {n} problems from a dataset of "
@@ -105,8 +105,9 @@ CAPS = {
     "gsm8k": {
         "cot": 3072,
         "nothink": 512,
-        # 32 -> 128. Decision 20 set 32 on the basis of "max observed was 7
-        # tokens", which was measured on INTACT runs only. Milestone 6 showed
+        # 32 -> 128. The cap was first set to 32 on the basis of "max observed
+        # was 7 tokens", which was measured on INTACT runs only. The
+        # intervention-placement probe (probes/intervention.py) then showed
         # the cap binding on 100% of intervened direct generations.
         # cap_warnings' own docstring already prescribed 128-256 for exactly
         # this reason.
@@ -135,7 +136,7 @@ def cap_for(cond: str, dataset: str) -> int:
     """max_new_tokens for a condition name like 'direct_ablated' on `dataset`.
 
     `dataset` is REQUIRED and has no default. A default of "gsm8k" is precisely
-    the bug this signature exists to close: m8_run.py accepted a --dataset flag
+    the bug this signature exists to close: run.py once accepted a --dataset flag
     and then loaded GSM8K regardless, so a MATH-500 run would have generated
     GSM8K problems under a MATH-500 filename. A parameter that CAN be forgotten
     eventually is.
@@ -158,16 +159,16 @@ def cap_for(cond: str, dataset: str) -> int:
             f"CAPS[{dataset!r}][{level!r}] is unset -- an UNDECIDED "
             f"pre-registration choice. Set it in config.py and commit before "
             f"running ablated data; choosing a cap after seeing results is the "
-            f"post-hoc rescue that decision 25 exists to prevent.")
+            f"post-hoc rescue this file exists to prevent.")
     return cap
 
 
 # --------------------------------------------------- direct-condition prompt
 
 # THE one definition of the direct condition's instruction and prefill. This
-# string was copy-pasted into m5_probe, m6_probe, m7_calibration and m8_run --
-# the same "a constant written twice can drift" failure as CAPS in a notebook
-# cell, and worse here, because m5_probe asserts a prompt FINGERPRINT
+# string was copy-pasted into three probes and the run script -- the same "a
+# constant written twice can drift" failure as CAPS in a notebook cell, and
+# worse here, because probes/capture.py asserts a prompt FINGERPRINT
 # (683d8ea5f9e42c80) against the committed run manifest: a one-word edit to any
 # single copy makes that probe describe a condition that never ran.
 #
@@ -176,10 +177,10 @@ def cap_for(cond: str, dataset: str) -> int:
 DIRECT_PREFILL = "\\boxed{"
 
 DIRECT_INSTRUCTION = {
-    # Byte-for-byte what the Milestone 4 and Milestone 8 GSM8K runs used. Do
-    # NOT reword it: runs/gsm8k_manifest.json and m5_probe.DIRECT_FINGERPRINT
-    # both pin this exact string, and the committed n=150 data stays comparable
-    # to later runs only while it holds.
+    # Byte-for-byte what the n=20 baseline and n=150 GSM8K runs used. Do NOT
+    # reword it: the archived run manifest and the fingerprint assertion in
+    # probes/capture.py both pin this exact string, and the committed n=150
+    # data stays comparable to later runs only while it holds.
     "gsm8k": ("\n\nRespond with only the final numeric answer and nothing "
               "else. Do not show any reasoning."),
 
@@ -219,8 +220,8 @@ def direct_prompt(dataset: str) -> tuple[str, str]:
             f"DIRECT_INSTRUCTION[{dataset!r}] is unset -- an UNDECIDED "
             f"pre-registration choice. Write the instruction in config.py and "
             f"commit it before generating. A prompt chosen after seeing which "
-            f"wording scored better is decision 25's post-hoc rescue with "
-            f"extra steps.")
+            f"wording scored better is the post-hoc rescue this file exists "
+            f"to prevent, with extra steps.")
     return suffix, DIRECT_PREFILL
 
 
@@ -264,9 +265,9 @@ BANDS = {
 PRIMARY_BAND = "light"
 
 # A fixed-width sliding window (14-19, 20-25, 26-31) plus a width sweep was run
-# to test whether the band was the problem, because m7_directions found the
-# direct answer is not readable in 14-19 at all (gold@10 = 0% through the whole
-# band, first reaching 100% at layer 32). It was not the problem. At the
+# to test whether the band was the problem, because the directions probe found
+# the direct answer is not readable in 14-19 at all (gold@10 = 0% through the
+# whole band, first reaching 100% at layer 32). It was not the problem. At the
 # pre-registered projection (each / gain-scaled) with the exclusion rule ON,
 # every window looks the same:
 #
@@ -309,14 +310,14 @@ K_OCCUPANCY = 25    # sparse-decomposition occupancy; NOT used for ablation
 # the rule exempts 0.18-0.76 of 10 directions and looked inert. Two later
 # measurements killed that:
 #
-#  1. WHERE. m7_cot_exposure at band 26-31 -- the band m7_directions says the
-#     answer is actually computed in -- measures the worst-layer overlap during
-#     generation at 5.05 of 10, not 0.76. The rule exempts HALF the selected
+#  1. WHERE. The exclusion-exposure probe at band 26-31 -- the band the
+#     directions probe says the answer is actually computed in -- measures the
+#     worst-layer overlap during generation at 5.05 of 10, not 0.76. The rule exempts HALF the selected
 #     directions there. It rises monotonically with depth, so an overlap
 #     measured at one band says nothing about another.
 #
-#  2. WHAT IT WAS DOING. m7_damage_floor, SST-2, band 14-33, ablation flip
-#     rate with the rule OFF vs ON:
+#  2. WHAT IT WAS DOING. The damage-floor probe, SST-2, band 14-33, ablation
+#     flip rate with the rule OFF vs ON:
 #
 #             SST-2      MMLU
 #       off     84%       24%
@@ -341,8 +342,8 @@ USE_EXCLUSION = True
 # "each", the paper's literal wording: zero the projection onto EACH of the
 # top-k vectors in turn. The worry was that ten overcomplete, non-orthogonal
 # directions make this order-dependent and leave part of their span behind,
-# which "span" would not. m7_directions measured how much that matters on
-# Qwen3-4B under J = I:
+# which "span" would not. The directions probe measured how much that matters
+# on Qwen3-4B under J = I:
 #
 #     eff_rank 9.13 of 10   mean |cos| 0.132   (random tokens: 9.54 / 0.127)
 #
@@ -375,10 +376,10 @@ PROJECTION_MODE = "each"
 # report. It costs displacement: 0.145 gain-scaled against 0.200 bare.
 PROJECT_GAIN_SCALED = True
 
-# Decision 24's gate: after Milestone 7, run ablated CoT on a few problems and
-# stop to revise if generation has degenerated badly enough that the comparison
-# is meaningless. Three things had to be settled -- what it reads, against what
-# baseline, and how big.
+# The degeneration gate: before paying for the expensive cells, run ablated
+# CoT on a few problems and stop to revise if generation has degenerated badly
+# enough that the comparison is meaningless. Three things had to be settled --
+# what it reads, against what baseline, and how big.
 #
 # WHAT IT READS: "unusable", i.e. outcome in {incomplete, unparsed, error}, NOT
 # distinct10. On the M4 baseline a genuinely non-terminating trace (id 286,
@@ -410,7 +411,8 @@ LOOP_GATE = {
 UNUSABLE_OUTCOMES = ("incomplete", "unparsed", "error")
 
 # Only genuinely open items belong here. PROJECTION_MODE and
-# PROJECT_GAIN_SCALED were settled from m7_directions and the readout algebra;
+# PROJECT_GAIN_SCALED were settled from the directions probe and the readout
+# algebra;
 # their reasoning is above, where a later reader can disagree with it.
 # Empty: every top-level pre-registration choice is settled, each with its
 # measurement recorded above. require() still raises on any None, so a constant
@@ -445,8 +447,8 @@ def require(name: str):
             + (f" -- an UNDECIDED pre-registration choice ({why})" if why
                else " (it is not listed as undecided, so this is unexpected)")
             + ". Set it in config.py and commit before running ablated data; "
-              "choosing it after seeing results is the post-hoc rescue that "
-              "decision 25 exists to prevent.")
+              "choosing it after seeing results is the post-hoc rescue this "
+              "file exists to prevent.")
     return val
 
 
@@ -455,7 +457,7 @@ def projection(mode: str | None = None, gain: bool | None = None):
 
     Every probe and the run loop must agree on this or a measurement describes
     a different operation than the run it was taken to calibrate. That is not
-    hypothetical: m7_calibration.py hardcoded ("span", True) as a working
+    hypothetical: the calibration probe hardcoded ("span", True) as a working
     assumption while these were still None, the comment saying so went stale
     the moment they were settled, and an entire session's flip rates were
     measured with "span" against a pre-registration that says "each". Same

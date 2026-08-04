@@ -10,7 +10,7 @@ Usage:
 Positional args are, in order:
     direct_intact  direct_ablated  cot_intact  cot_ablated
 
-Take direct_intact and cot_intact from the baseline run (Milestone 4 gives
+Take direct_intact and cot_intact from the baseline run (the n=20 pilot gives
 them for free) plus a guess at the ablation drops, then read off the n you
 need. This is a pre-registration input, not a post-hoc excuse.
 

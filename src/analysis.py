@@ -17,10 +17,10 @@ differences of four noisy proportions -- noise compounds four times while
 signal does not. Simulation: at n=20 per cell, a REAL 20-point interaction is
 detected only ~26% of the time. See power.py.
 
-NAMING (FIX 6)
---------------
+NAMING
+------
 There are no A/B/C/D letters in this codebase. They previously meant one
-thing in the design table (A = direct intact) and another in the Milestone-4
+thing in the design table (A = direct intact) and another in the baseline
 run script (A_cot = CoT intact); mapping them backwards flips the sign of the
 headline number and nothing errors. Roles and conditions now share one
 `{level}_{state}` grid defined in scoring.LEVELS / scoring.STATES.
@@ -69,7 +69,7 @@ def to_matrix(records, cells=CELLS):
     never silent -- a cell that systematically fails to produce records
     (e.g. crashes under ablation) would otherwise vanish from the analysis.
 
-    FIX 8: an empty cell now raises. Previously it returned ids=[] and the
+    An empty cell raises. Previously it returned ids=[] and the
     bootstrap returned nan for point/lo/hi with p=0.0; the verdict test
     (`lo > 0 or hi < 0`) is False under NaN, so `report` printed
 
@@ -170,7 +170,7 @@ def mcnemar(x, y):
 
 
 def _degenerate(r) -> bool:
-    """Looping anywhere -- in the trace OR in the answer body (FIX 4).
+    """Looping anywhere -- in the trace OR in the answer body.
 
     Falls back to the pre-fix `distinct10` field so old score files still
     load, but those files cannot see trace looping at all.
@@ -188,7 +188,7 @@ def cell_table(records, cells=CELLS, ids=None):
     termination failure, not a reasoning failure, and the two support very
     different claims.
 
-    FIX 7: pass `ids` to restrict to the paired complete cases. Without it
+    Pass `ids` to restrict to the paired complete cases. Without it
     this table is computed over ALL records while the interaction is computed
     over complete cases only, so the two disagree. Measured on a synthetic
     run where one cell lost its ten hardest problems:
@@ -221,7 +221,7 @@ def cell_table(records, cells=CELLS, ids=None):
 
 
 def cap_warnings(rows, abs_thresh=0.05, diff_thresh=0.05) -> list[str]:
-    """FIX 5: max_new_tokens asymmetry is a confound, not a detail.
+    """max_new_tokens asymmetry is a confound, not a detail.
 
     Caps of 2048 (cot) / 512 (nothink) / 32 (direct) mean that under ablation
     -- which makes every condition longer and loopier -- only the direct
@@ -254,7 +254,7 @@ def cap_warnings(rows, abs_thresh=0.05, diff_thresh=0.05) -> list[str]:
 
 def report(records, cells=CELLS, n_boot=10000, seed=0, label=""):
     ids, mat, dropped = to_matrix(records, cells)
-    rows = cell_table(records, cells, ids=ids)        # FIX 7: paired only
+    rows = cell_table(records, cells, ids=ids)        # paired complete cases
     rows_all = cell_table(records, cells)
 
     if label:
@@ -409,7 +409,7 @@ def observed_rho(mat) -> float:
 
 
 def baseline_table(records, conditions):
-    """Milestone-4 helper: cell table for a baseline-only run.
+    """Baseline helper: cell table for a baseline-only (no-ablation) run.
 
     `report` needs all four 2x2 cells and will raise on baseline-only data.
     Pass the condition names you generated, e.g.

@@ -1,17 +1,17 @@
-"""Milestone 7, step 0 -- can the ablation move the outcome measure at all?
+"""Calibration -- can the ablation move the outcome measure at all?
 
-    python m7_calibration.py           # real Qwen3-4B on mps
-    python m7_calibration.py --tiny    # weightless smoke test
+    python -m probes.calibrate           # real Qwen3-4B on mps
+    python -m probes.calibrate --tiny    # weightless smoke test
 
 NO ABLATED DATA IS PRODUCED HERE. Nothing is generated and nothing is scored.
-This measures the SIZE of the intervention, because Milestone 6 found that
-size is not a smooth dial:
+This measures the SIZE of the intervention, because the placement probe found
+that size is not a smooth dial:
 
     alpha 0.004 -> 0.1   KL ~1e-4, greedy text unchanged   (dead zone)
     alpha 0.1   -> 0.3   KL rises ~6800x                   (cliff)
 
 If projecting out the top-10 J-lens directions removes under ~10% of ||h||,
-Milestone 7 will measure no accuracy effect from an ablation working exactly
+this calibration will measure no accuracy effect from an ablation working exactly
 as specified, and that null is indistinguishable from the hypothesis being
 false. If it removes more than ~30%, the model may simply be broken, and that
 is indistinguishable too. Either way you want to know for the price of a few
@@ -24,14 +24,14 @@ lm_head(g * h / rms(h)) -- same ranking mathematically, different rounding,
 and vastly more near-ties available to flip at real vocabulary size.
 
 The ablation applied here is PREFILL-ONLY, which for the direct condition is
-very nearly the whole recipe: Milestone 5 measured 97% of its positions as
-prefill, and the answer is the token straight after the "\\boxed{" prefill.
+very nearly the whole recipe: the capture probe measured 97% of its positions
+as prefill, and the answer is the token straight after the "\\boxed{" prefill.
 
-The exclusion rule follows config.USE_EXCLUSION, now False -- see the
-measurement in config.py that justifies dropping it. That also removes the
-reason Milestone 7 proper would have needed a paired clean forward pass at
-every generation step, so the Milestone 8 loop is Intervene wrapped around
-model.generate rather than a two-cache decoder.
+The exclusion rule follows config.USE_EXCLUSION -- now True. An earlier
+revision of this docstring said the rule had been dropped; that decision was
+reversed on the measurements recorded in config.py, and the reversal is why
+the main run loop pays for a paired clean forward pass at every generation
+step instead of being Intervene wrapped around model.generate.
 """
 import argparse
 import math
@@ -50,7 +50,7 @@ from loaders import MODEL, load_real, load_tiny
 # probe imports both names from here, which is why they stay module-level.
 DIRECT_SUFFIX, DIRECT_PREFILL = config.direct_prompt("gsm8k")
 
-# Measured in Milestone 6 on the real model, LIGHT band, direct prompt.
+# Measured by the placement probe on the real model, LIGHT band, direct prompt.
 NOISE_CURVE = [(0.004, 0.00011), (0.01, 0.00022), (0.03, 0.00060),
                (0.1, 0.00058), (0.3, 3.95382), (1.0, 8.15946)]
 
@@ -72,7 +72,7 @@ def wilson(k, n, z=1.96):
 
 
 def mcnemar(b, c):
-    """Exact two-sided McNemar on the discordant pairs -- decision 13.
+    """Exact two-sided McNemar on the discordant pairs.
 
     Only the discordant counts carry information: problems that flip under
     both conditions, or neither, say nothing about whether the SELECTION
@@ -107,7 +107,7 @@ def main(argv=None):
                          "matters on a band or task where it was not "
                          "justified.")
     ap.add_argument("--skip-sink", action="store_true",
-                    help="spare position 0. m7_directions measured it as the "
+                    help="spare position 0. The directions probe measured it as the "
                          "ONLY position above 10x the median residual norm -- "
                          "the <|im_start|> attention sink, at 266-363x. "
                          "project_out removes a fixed FRACTION of ||h||, so "
@@ -333,7 +333,7 @@ def main(argv=None):
             # Step 1 above still MEASURES the overlap -- that measurement is
             # what justified config.USE_EXCLUSION, and would overturn it on a
             # band where the rule bites harder. What changes here is whether
-            # the ablation ACTS on it, which must match what Milestone 8 does.
+            # the ablation ACTS on it, which must match what run.py does.
             ex = exclude_by_prob[pid] if use_ex else None
             # positions is SCOPE, a different axis from `exclude`, which is
             # vocabulary space. Sparing the sink is a position decision.
@@ -368,7 +368,7 @@ def main(argv=None):
     print(f"\n   M6 noise dose-response for scale: "
           + "  ".join(f"a={al}:{k:.4f}" for al, k in NOISE_CURVE))
 
-    # ------------------------------------------------- paired, decision 13
+    # ------------------------------------------------- paired, exact McNemar
     ok_set = set(correct_ids)
     print(f"\n   PAIRED -- ablation vs random tokens on the SAME problems.")
     print(f"   {'subset':>12}{'both':>7}{'abl only':>10}{'ctl only':>10}"
@@ -399,7 +399,7 @@ def main(argv=None):
     # in the sequence, so (nc - sub)/n bounds direct_ablated from ABOVE, and
     # the drop it implies is therefore a LOWER bound. The old text read
     # "the interaction cannot exceed D points" off a number that says the
-    # opposite, and decision 40's n choice was about to be made against it.
+    # opposite, and the sample-size choice was about to be made against it.
     #
     # What this probe genuinely bounds:
     #   direct_ablated <= DA        so   direct drop >= DI - DA

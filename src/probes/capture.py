@@ -1,7 +1,7 @@
-"""Milestone 5 -- read one layer's activation and PROVE it is the right tensor.
+"""Capture probe -- read one layer's activation and PROVE it is the right tensor.
 
-    python m5_probe.py                # real Qwen3-4B on mps
-    python m5_probe.py --tiny         # weightless smoke test, seconds, no GPU
+    python -m probes.capture          # real Qwen3-4B on mps
+    python -m probes.capture --tiny   # weightless smoke test, seconds, no GPU
 
 No intervention anywhere in this file. Every check is falsifiable: it can come
 back red, and if it does, the reason is named.
@@ -47,7 +47,7 @@ def load_real(device):
     tok = AutoTokenizer.from_pretrained(MODEL)
     model = AutoModelForCausalLM.from_pretrained(
         MODEL, dtype=torch.bfloat16).to(device).eval()
-    model.generation_config.do_sample = False   # decision 21
+    model.generation_config.do_sample = False   # greedy: determinism everywhere
     return model, tok
 
 
@@ -215,9 +215,9 @@ def main(argv=None):
     npass = sum(ok for _, ok in RESULTS)
     print(f"\n{npass}/{len(RESULTS)} checks passed")
     if npass != len(RESULTS):
-        print("Milestone 5 is NOT complete. Do not start Milestone 6 -- an "
+        print("Capture is NOT verified. Do not run any intervention -- an "
               "intervention on a tensor you have not verified is the exact "
-              "failure this milestone exists to prevent.")
+              "failure this probe exists to prevent.")
     return 0 if npass == len(RESULTS) else 1
 
 

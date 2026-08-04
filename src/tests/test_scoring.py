@@ -59,11 +59,11 @@ TESTS = [
     # thinking mode done properly
     ("<think>48+24=72</think>\n\n" + r"\boxed{72}", "72", False, True, "correct"),
 
-    # ==== FIX 1: markdown emphasis broke extraction =====================
+    # ==== markdown emphasis broke extraction =====================
     # All six of these returned [] from math-verify 0.9.0 and were therefore
     # scored `unparsed` -- i.e. counted as wrong. The direct condition is
     # asked for a bare number and so emits exactly '**72**' most often, which
-    # would have pushed Milestone-4 direct accuracy toward the "< 15% = floor
+    # would have pushed baseline direct accuracy toward the "< 15% = floor
     # problem" branch of the decision rule for a purely cosmetic reason.
     ("**72**",                                   "72", False, False, "correct"),
     ("*72*",                                     "72", False, False, "correct"),
@@ -76,7 +76,7 @@ TESTS = [
     # bare asterisks as multiplication must survive untouched
     ("The product is 2*3 and 4*5, so 6.",         "6", False, False, "correct"),
 
-    # ==== FIX 2: the gate now keys on the TEXT, not just the flag ========
+    # ==== the gate keys on the TEXT, not just the flag ========
     # Previously ('correct', '72'): a non-thinking condition emitted <think>
     # (ablation makes this happen) and the unclosed trace got graded.
     ("<think>I think it is 72 but I am unsure",  "72", False, False, "incomplete"),
@@ -84,7 +84,7 @@ TESTS = [
     # a closed trace from a non-thinking condition is still gradeable
     ("<think>48+24=72</think>\n\n72",            "72", False, False, "correct"),
 
-    # ==== FIX 3: truncate at end tokens, don't delete them ==============
+    # ==== truncate at end tokens, don't delete them ==============
     # Previously ('correct', '144'): the model stopped without answering and
     # the grade came from a second turn it hallucinated past <|im_end|>.
     ("Let me reconsider the problem.<|im_end|><|im_start|>assistant\n144",
@@ -98,7 +98,7 @@ def test_scoring():
     shows the full table rather than stopping at the first bad case.
 
     The assert is load-bearing: this function used to accumulate into `ok`
-    and RETURN it, which pytest ignores. A deliberately broken scorer (FIX 2
+    and RETURN it, which pytest ignores. A deliberately broken scorer (the text-gate fix
     reverted) produced "8 passed" under pytest while `python test_scoring.py`
     correctly exited 1 -- so a CI job wired to pytest would have been green
     on a broken scorer.
@@ -120,14 +120,14 @@ def test_strip_think():
     assert strip_think("<think>a</think>\n\nb<|im_end|>") == "b"
     assert strip_think("no tags here") == "no tags here"
     assert strip_think("<think>unclosed") == "<think>unclosed"
-    # FIX 3: everything after the stop token is discarded, not just the token
+    # everything after the stop token is discarded, not just the token
     assert strip_think("b<|im_end|><|im_start|>assistant\nc") == "b"
     assert strip_think("b<|endoftext|>junk") == "b"
     print("ok   strip_think")
 
 
 def test_think_trace():
-    """FIX 4 support: recover the trace in all three shapes Qwen emits."""
+    """Trace recovery: recover the trace in all three shapes Qwen emits."""
     assert think_trace("<think>abc</think>\n\nans") == "abc"
     assert think_trace("<think>unclosed abc") == "unclosed abc"
     # template pre-filled the opening tag, so only </think> is generated
@@ -165,7 +165,7 @@ def test_degeneracy():
     assert distinct_ngram_ratio(clean) > 0.9
     assert distinct_ngram_ratio(loop) < DEGENERATE_BELOW
     assert distinct_ngram_ratio("short") == 1.0
-    # FIX 4: the looping lives in the TRACE. Scoring the body alone is blind.
+    # the looping lives in the TRACE. Scoring the body alone is blind.
     cot = "<think>" + loop + "</think>\n\nThe answer is 72."
     body_ratio = distinct_ngram_ratio(strip_think(cot))
     trace_ratio = distinct_ngram_ratio(think_trace(cot))
@@ -177,7 +177,7 @@ def test_degeneracy():
 
 
 def test_cond_names():
-    """FIX 6: names come from a grid, so a typo cannot reach the analysis."""
+    """Names come from a grid, so a typo cannot reach the analysis."""
     assert cond_name("cot", "intact") == "cot_intact"
     assert parse_cond("direct_ablated") == ("direct", "ablated")
     for bad in ("A_cot", "cot_intact_2", "direct", "cot_broken"):

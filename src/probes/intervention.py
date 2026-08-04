@@ -1,7 +1,7 @@
-"""Milestone 6 -- trivial intervention, and prove it lands where you think.
+"""Placement probe -- trivial intervention, and prove it lands where you think.
 
-    python m6_probe.py                # real Qwen3-4B on mps
-    python m6_probe.py --tiny         # weightless smoke test, no GPU
+    python -m probes.intervention          # real Qwen3-4B on mps
+    python -m probes.intervention --tiny   # weightless smoke test, no GPU
 
 "Output changed" is NOT the deliverable. Any perturbation anywhere changes
 the output. Section 11 of the handoff document says to expect the ablation to
@@ -40,7 +40,7 @@ RESULTS = []
 
 
 def check(name, ok, detail="", gating=True):
-    """gating=False: calibration, reported but does not block Milestone 7."""
+    """gating=False: calibration, reported but does not block the next step."""
     RESULTS.append((name, bool(ok), gating))
     print(f"  {'PASS' if ok else 'FAIL'}  {name}"
           + (f"\n          {detail}" if detail and not ok else ""))
@@ -250,7 +250,7 @@ def main(argv=None):
     print(f"calibration {sum(ok for _, ok in info)}/{len(info)} passed  "
           f"(D -- informational)")
     if ng != len(gate):
-        print("\nMilestone 6 is NOT complete. Do not start Milestone 7.")
+        print("\nPlacement is NOT verified. Do not calibrate or run against it.")
         for k, ok in gate:
             if not ok:
                 print(f"  failed: {k}")

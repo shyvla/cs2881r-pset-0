@@ -35,9 +35,9 @@ from importlib.metadata import PackageNotFoundError, version
 from math_verify import LatexExtractionConfig, parse, verify
 
 # ====================================================== condition naming
-# FIX 6. Condition names are built from a grid, never hand-typed, because
+# Condition names are built from a grid, never hand-typed, because
 # "A"/"B"/"C"/"D" meant different things in the design table (A = direct
-# intact) and in the Milestone-4 run script (A_cot = CoT intact). Mapping
+# intact) and in the baseline run script (A_cot = CoT intact). Mapping
 # those backwards silently flips the sign of the headline number and nothing
 # errors. There are no letters anywhere in this codebase now.
 #
@@ -126,7 +126,7 @@ def strip_think(text: str) -> str:
     "<think>The answer is \boxed{72}. No wait.</think> The answer is 144."
     scores CORRECT against gold 72.
 
-    FIX 3: end tokens are TRUNCATED AT, not deleted. Deleting them left any
+    End tokens are TRUNCATED AT, not deleted. Deleting them left any
     text generated after <|im_end|> inside the body, so a run-on hallucinated
     second turn got graded. Measured with the old code:
 
@@ -145,7 +145,7 @@ def strip_think(text: str) -> str:
 
 
 def think_trace(text: str) -> str:
-    """The reasoning block itself, for degeneracy diagnostics (FIX 4).
+    """The reasoning block itself, for degeneracy diagnostics.
 
     Handles all three shapes Qwen produces: an explicit <think>...</think>
     pair; an unclosed <think> (ran out of room mid-trace); and a trace whose
@@ -159,7 +159,7 @@ def think_trace(text: str) -> str:
     return text.split("</think>", 1)[0]
 
 
-# --- markdown normalisation (FIX 1) -----------------------------------
+# --- markdown normalisation --------------------------------------------
 # Qwen3 wraps final answers in markdown emphasis constantly, and a trailing
 # "**" glues onto the number so that "72**" reads as a dangling Python-style
 # exponentiation and fails to parse. Measured on math-verify 0.9.0:
@@ -174,7 +174,7 @@ def think_trace(text: str) -> str:
 #
 # This bit the direct condition hardest: it is instructed to emit only a
 # number, and therefore most often emits exactly "**72**". Left unfixed it
-# would have driven the Milestone-4 direct accuracy artificially toward the
+# would have driven the baseline direct accuracy artificially toward the
 # "< 15% = floor problem" branch of the decision rule.
 #
 # A blanket strip of "*" is NOT safe -- it turns "3*4*5" into "345" -- so
@@ -261,7 +261,7 @@ def score_detail(raw: str, gold: str, hit_cap: bool, thinking: bool) -> dict:
         parsed as if the trace were a final answer -- "<think>I think it is
         72 but I am unsure" scored CORRECT (false positive).
 
-    FIX 2: the second gate now keys on the TEXT as well as the flag. The old
+    The second gate keys on the TEXT as well as the flag. The old
     condition was `thinking and "</think>" not in raw`, which left the very
     same false positive open on the other branch:
 
@@ -342,7 +342,7 @@ DEGENERATE_BELOW = 0.5
 
 # ============================================== per-dataset: reading the data
 # The ONLY place the three datasets differ. Verify field names against the
-# loaded dataset before trusting them -- `m8_run.py --check-data` does exactly
+# loaded dataset before trusting them -- `run.py --check-data` does exactly
 # that, for free and without a GPU.
 
 GOLD_FIELD = {
@@ -356,13 +356,14 @@ GOLD_FIELD = {
 # here beside GOLD_FIELD rather than in config.py, which holds the numbers that
 # must be frozen before the data is seen.
 #
-# `mirrors` is tried in order, matching m7_damage_floor's SST-2/MMLU loaders:
+# `mirrors` is tried in order, matching the damage-floor probe's SST-2/MMLU
+# loaders:
 # hub repos get renamed and gated, and a run that dies on a 404 after the model
 # is resident has wasted the load.
 #
 # `question` is a TUPLE OF CANDIDATE FIELD NAMES, resolved against the actual
 # record by question_field() below, which raises listing the keys it did find.
-# The alternative -- one hardcoded name -- is what m8_run.py did with
+# The alternative -- one hardcoded name -- is what run.py once did with
 # ds[i]["question"], and it fails as a KeyError on the first problem of the
 # first cell, after the model has loaded.
 #
@@ -370,7 +371,7 @@ GOLD_FIELD = {
 # holds openai/gsm8k, cais/mmlu, stanfordnlp/sst2 and Qwen3-4B and nothing
 # else). The math500 and aime24 repo ids, splits and field names below are the
 # published conventions but have not been observed here. Run
-# `python m8_run.py --check-data --dataset math500` before trusting them; it
+# `python run.py --check-data --dataset math500` before trusting them; it
 # resolves the field name and parses every gold, and costs nothing.
 DATASETS = {
     "gsm8k": {
@@ -438,8 +439,8 @@ def question_field(dataset: str, record) -> str:
 
 
 def run_path(dataset: str, n: int, band: str) -> str:
-    """The generations file for a run. ONE construction, because m8_run.py
-    writes it and m8_analyze.py has to find it, and a filename built twice is
+    """The generations file for a run. ONE construction, because run.py
+    writes it and analyze.py has to find it, and a filename built twice is
     a filename that eventually disagrees -- with the analysis silently reading
     a different run than the one just produced."""
     return f"runs/{dataset}_n{n}_{band}.jsonl".replace("(", "").replace(
@@ -646,7 +647,7 @@ def score_file(gen_path: str, scores_path: str, conditions: dict,
                 "extracted": d["extracted"], "gold": r["gold"],
                 "normalized": d["normalized"],
                 "n_tok": r.get("n_tok"), "hit_cap": r["hit_cap"],
-                # FIX 4: BOTH ratios. distinct10 used to be computed on the
+                # BOTH ratios. distinct10 used to be computed on the
                 # stripped body only, so a CoT generation whose trace was 97%
                 # repetition scored 1.000 -- the degeneracy detector was blind
                 # in exactly the cell (ablated CoT) where the integration test

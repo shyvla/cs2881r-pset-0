@@ -1,8 +1,8 @@
 """Forward-hook machinery for the J-space ablation experiment.
 
-Milestone 5 scope: register hooks on decoder layers, capture the residual
-stream, guarantee removal. No intervention. Half B's ablation reuses
-`LayerHooks` with a different hook function -- nothing here changes for it.
+Capture first: register hooks on decoder layers, read the residual stream,
+guarantee removal. The ablation reuses `LayerHooks` with a different hook
+function -- nothing in the capture machinery changes for it.
 
 THE CONTRACT (transformers 5.14.1)
 ----------------------------------
@@ -32,7 +32,8 @@ config -- no weights, no download, no GPU, runs in seconds.
    the Half B intervention mechanism. Returning a v4-style tuple raises
    AttributeError -- loudly, which is the good case: the ablation cannot
    quietly do nothing by returning the wrong container. It can only quietly do
-   nothing by being on the wrong tensor, which is what Milestone 6 is for.
+   nothing by being on the wrong tensor, which is what the placement probe
+   (probes/intervention.py) exists to rule out.
 
 4. Calling `output_hidden_states=True` PERMANENTLY installs one forward hook
    per decoder layer, and never removes them. `maybe_install_capturing_hooks`
@@ -321,7 +322,7 @@ class Capture(LayerHooks):
 
 
 # ============================================================ INTERVENTION
-# Milestone 6 onward. The signature is fixed by the paper's ablation recipe
+# The signature is fixed by the paper's ablation recipe
 # (transformer-circuits.pub/2026/workspace, "J-space ablation leaves most
 # capabilities intact"):
 #
@@ -380,7 +381,7 @@ class Intervene(LayerHooks):
               measured rather than assumed.
     positions None = every position, or a set of ABSOLUTE positions.
     exclude   dict {abs position -> iterable of token ids} handed to fn. Not
-              interpreted here; the ablation in Milestone 7 consumes it.
+              interpreted here; make_ablation's hook function consumes it.
     """
 
     def __init__(self, model, layers, fn, scope="both", positions=None,
@@ -476,15 +477,15 @@ class Intervene(LayerHooks):
 def add_noise(alpha: float, seed: int = 0):
     """Gaussian noise scaled to each position's residual norm.
 
-    Scaled, not absolute: Milestone 5 measured mean residual norm rising from
+    Scaled, not absolute: the capture probe measured mean residual norm rising from
     ~9 at L00 to ~545 at L31, a 60x range. Absolute noise would be negligible
     deep and catastrophic shallow, and the dose-response curve would be
     uninterpretable. alpha is the fraction of ||h|| added, per position.
 
     Generated on CPU in float32 from a seeded Generator, then moved. Costs a
     transfer; buys identical noise on MPS and CUDA, without which the
-    random-direction control cannot be reproduced across the platform change
-    between Milestone 6 and Milestone 8.
+    random-direction control cannot be reproduced across a platform change
+    between a probe run and the real one.
     """
     def fn(h, firing):
         if alpha == 0.0:
@@ -709,8 +710,8 @@ def make_ablation(model, k: int, mode: str, gain_scaled: bool,
                   kind: str = "ablate", seed: int = 0, track=None):
     """The intervention itself, as an `Intervene` fn -- ONE definition.
 
-    Milestone 7's calibration, the automatic-task damage floor and the
-    Milestone 8 run loop all apply the same operation, and the same reasoning
+    The calibration probe, the automatic-task damage floor and the main
+    run loop all apply the same operation, and the same reasoning
     that put the module path in `decoder_layers` and the prompt in
     `render_prompt` applies here with more force: an ablation written twice
     can drift, and the drift would be between the measurement and its own

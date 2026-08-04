@@ -1,21 +1,23 @@
-"""Milestone 8 -- the 2x2 plus the random-direction control. Produces DATA.
+"""The experiment -- the 2x2 plus the random-direction control. Produces DATA.
 
-    python m8_run.py --n 1                     # time one problem, six cells
-    python m8_run.py --n 150 --layers 26-31    # the run
-    python m8_run.py --tiny                    # weightless wiring check
-    python m8_run.py --check-data --dataset math500   # no model, no GPU
+    python run.py --n 1                     # time one problem, six cells
+    python run.py --n 150 --layers 26-31    # the run
+    python run.py --tiny                    # weightless wiring check
+    python run.py --check-data --dataset math500   # no model, no GPU
 
 Resumable: re-running appends only what is missing, keyed by (id, cond).
 
 --dataset SELECTS THE DATASET, and did not always. It was accepted as a flag
 and then ignored: the loader, the gold field and the fingerprint all named
 GSM8K literally, so `--dataset math500` produced GSM8K problems, scored against
-GSM8K golds, in a file called m8_math500_*.jsonl. The pin file was the only
+GSM8K golds, in a file named as if it were MATH-500. The pin file was the only
 thing that would have told you. Everything per-dataset now comes from
 scoring.DATASETS (how to read it) and config (caps and the prompt), and
 `--check-data` verifies the reading half before a GPU is involved.
 
-SIX CELLS, from the scoring.cond_name grid rather than typed out (decision 17):
+SIX CELLS, from the scoring.cond_name grid rather than typed out (a name
+written by hand can drift from the grid, and a drifted name flips the sign of
+the headline number without erroring):
 
     direct_intact   direct_ablated   direct_random
     cot_intact      cot_ablated      cot_random
@@ -34,7 +36,7 @@ all fixed before this script runs and are recorded in the manifest afterwards.
 `--layers` is the one exception and it prints a warning, because an exploratory
 window is not a pre-registered band.
 
-THE LOOP GATE (decision 24, settled in config.LOOP_GATE) fires between cells,
+THE LOOP GATE (pre-registered in config.LOOP_GATE) fires between cells,
 not after the whole run: the ablated CoT cell is the expensive one and the
 gate's whole purpose is to stop before paying for it. It compares the
 `unusable` rate -- outcome in {incomplete, unparsed, error} -- against the
@@ -84,7 +86,7 @@ def conditions(dataset: str):
 
 
 def gate_check(path, cells, gate):
-    """Decision 24. Returns (fired, message). Reads the scored outcomes of the
+    """The loop gate. Returns (fired, message). Reads the scored outcomes of the
     ablated cell against its matched intact cell over the first gate['n'] ids
     they share."""
     from scoring import score

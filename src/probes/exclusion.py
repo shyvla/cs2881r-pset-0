@@ -1,13 +1,15 @@
-"""Does the paper's exclusion rule actually bite during CoT generation?
+"""Exclusion-exposure probe -- does the paper's exclusion rule actually bite
+during CoT generation?
 
-    python m7_cot_exposure.py            # real Qwen3-4B on mps
-    python m7_cot_exposure.py --tiny     # weightless smoke test
+    python -m probes.exclusion            # real Qwen3-4B on mps
+    python -m probes.exclusion --tiny     # weightless smoke test
 
 WHY THIS DECIDES SOMETHING. The paper exempts, at each position, the J-lens
 vectors of the tokens in the top-10 of a CLEAN forward pass. Getting that set
 during generation needs a paired un-ablated pass at every step, which roughly
-doubles the two most expensive cells of Milestone 8. Nothing in the repo
-implements it, and there are three ways forward:
+doubles the two most expensive cells of the main run. At the time of this
+measurement nothing in the repo implemented it (run.py now does), and there
+were three ways forward:
 
   (a) build the two-cache decode loop            faithful, ~2x the cost
   (b) drop the exclusion rule in BOTH arms       cheap, a stated deviation
@@ -49,8 +51,8 @@ from hooks import Capture, n_layers, resolve_band, topk_tokens
 from loaders import load_real, load_tiny
 
 BASELINE = "runs/gsm8k_baseline.jsonl"
-# Milestone 7 step 1, direct condition, PREFILL positions, band 14-19. The
-# comparison this probe exists to make.
+# From the calibration run: direct condition, PREFILL positions, band 14-19.
+# The comparison this probe exists to make.
 #
 # These replace an earlier set (0.12 ... 0.47) that came from a hand-typed
 # paraphrase prompt the run never used -- the same "measured a prompt that

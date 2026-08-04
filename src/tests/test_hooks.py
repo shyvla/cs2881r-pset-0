@@ -197,7 +197,7 @@ def test_output_hidden_states_reports_pre_intervention():
     transformers capture hook was registered first and runs first.
 
     If this ever goes green-by-equality, re-read contract 5 before trusting
-    any Milestone 6 verification."""
+    any intervention-placement verification."""
     m = tiny_model()
     x = ids()
     with torch.no_grad():
@@ -406,7 +406,7 @@ def test_bf16_rounds_away_tiny_alpha():
 
     What DOES hold, measured on the real model, is behavioural: KL stays at
     ~1e-4 from alpha 0.004 to 0.1, then rises ~6800x by 0.3. That flat region
-    is the real hazard for Milestone 7, and it is not a dtype property.
+    is the real hazard for calibration, and it is not a dtype property.
 
     h is seeded: with an unseeded draw one near-zero element flips a bitwise
     test, which is how this test first failed."""
@@ -542,7 +542,7 @@ def _ablate_logits(m, x, layer, exclude, kind="ablate", seed=0):
 
 
 def test_generate_ablated_matches_model_generate_when_fn_is_noop():
-    """The reference test for the Milestone 8 decode loop.
+    """The reference test for run.py's decode loop.
 
     generate_ablated reimplements greedy decoding so the exclusion rule can
     interleave a clean forward pass per step. A reimplemented decoder is a
@@ -655,7 +655,8 @@ def test_make_ablation_honours_the_exclusion_set():
 
 def test_make_ablation_control_is_seed_reproducible():
     """The random-direction control has to reproduce across the MPS -> CUDA
-    move, or Milestone 8's control is not the same control as Milestone 7's."""
+    move, or the run's control is not the same control the calibration
+    probe measured."""
     m, x, L = tiny_model(), ids(8), 3
     a = _ablate_logits(m, x, L, {}, kind="rand_tok", seed=5)
     assert torch.equal(a, _ablate_logits(m, x, L, {}, kind="rand_tok", seed=5))
@@ -805,8 +806,8 @@ def test_directions_for_shape_and_gain_flag():
 # ================================================== config: pre-registration
 
 def test_direct_cap_does_not_bind():
-    """Milestone 6 saw the cap bind on 100% of intervened direct generations
-    at 32. cap_warnings' own docstring prescribes 128-256."""
+    """The placement probe saw the cap bind on 100% of intervened direct
+    generations at 32. cap_warnings' own docstring prescribes 128-256."""
     assert config.CAPS["gsm8k"]["direct"] >= 128, config.CAPS["gsm8k"]["direct"]
 
 
@@ -825,7 +826,7 @@ def test_cap_for_is_keyed_by_level_so_ablated_states_need_no_entries():
 
 
 def test_cap_for_requires_a_dataset():
-    """The signature IS the fix. m8_run.py accepted --dataset and then loaded
+    """The signature IS the fix. run.py once accepted --dataset and then loaded
     GSM8K anyway, so a MATH-500 run was GSM8K problems under a MATH-500
     filename. A cap_for(cond) that defaulted to gsm8k would let exactly that
     class of bug back in, silently."""
@@ -848,8 +849,9 @@ def test_unset_caps_raise_rather_than_reaching_generate():
 
 
 def test_gsm8k_direct_prompt_is_byte_identical_to_what_ran():
-    """The committed n=150 data and m5_probe.DIRECT_FINGERPRINT both pin this
-    exact string. Centralising it into config must not have reworded it."""
+    """The committed n=150 data and the fingerprint assertion in
+    probes/capture.py both pin this exact string. Centralising it into config
+    must not have reworded it."""
     suffix, prefill = config.direct_prompt("gsm8k")
     assert suffix == ("\n\nRespond with only the final numeric answer and "
                       "nothing else. Do not show any reasoning."), repr(suffix)
@@ -1017,8 +1019,8 @@ def main(argv=None):
             print(f"  FAIL  {name}: {type(e).__name__}: {e}")
     print(f"\n{len(tests) - len(failed)}/{len(tests)} passed")
     if failed:
-        print("hooks.py contract is NOT satisfied -- do not proceed to "
-              "Milestone 6.")
+        print("hooks.py contract is NOT satisfied -- do not run any "
+              "intervention against it.")
     return 1 if failed else 0
 
 

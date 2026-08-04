@@ -1,12 +1,12 @@
-"""Milestone 7 diagnostic -- WHAT does the top-10 select, and how many
+"""Directions probe -- WHAT does the top-10 select, and how many
 directions are really in it?
 
-    python m7_directions.py           # real Qwen3-4B on mps
-    python m7_directions.py --tiny    # weightless smoke test
+    python -m probes.directions           # real Qwen3-4B on mps
+    python -m probes.directions --tiny    # weightless smoke test
 
 NOTHING IS GENERATED, SCORED, OR INTERVENED ON. This is pure measurement.
 
-WHY THIS EXISTS. The Milestone 7 calibration found the random-token control
+WHY THIS EXISTS. The calibration probe found the random-token control
 flipping the answer at least as often as the ablation (4/12 vs 3/12) while
 removing LESS of the residual stream (0.051 vs 0.080). So the flips are not a
 magnitude artifact -- something is wrong with WHICH ten directions we pick.
@@ -196,7 +196,7 @@ def main(argv=None):
     ap.add_argument("--tiny", action="store_true")
     ap.add_argument("--device", default=None)
     ap.add_argument("--n", type=int, default=12,
-                    help="problem pool, mirrors m7_calibration.py --n")
+                    help="problem pool, mirrors probes/calibrate.py --n")
     ap.add_argument("--pid", type=int, default=0,
                     help="index into that pool; the prompt to inspect")
     ap.add_argument("--n-pos", type=int, default=6,
@@ -213,7 +213,7 @@ def main(argv=None):
     K = config.K_ABLATE
 
     # The prompt is a real dataset problem drawn by config.problem_ids, never
-    # hardcoded. m7_calibration.py steps 0-2 used a hand-typed paraphrase and
+    # hardcoded. Early calibration steps used a hand-typed paraphrase and
     # therefore characterised a prompt that never ran -- it reported a
     # displacement of 0.118 for a run that applied 0.080.
     encs, golds = [], []

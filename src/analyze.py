@@ -1,8 +1,8 @@
-"""Analyse an m8_run.py generations file. Scoring is separate from generation.
+"""Analyse a run.py generations file. Scoring is separate from generation.
 
-    python m8_analyze.py                                  # default run file
-    python m8_analyze.py --file runs/m8_gsm8k_n150_light.jsonl
-    python m8_analyze.py --dataset math500 --n 500         # default file for it
+    python analyze.py                                  # default run file
+    python analyze.py --file runs/archive/m8_gsm8k_n150_light.jsonl
+    python analyze.py --dataset math500 --n 500        # default file for it
 
 Generation costs hours; scoring costs milliseconds. Keeping them apart means a
 change to the scorer is a diff and a re-run of THIS, not of the GPU job -- and
@@ -12,7 +12,7 @@ from a shell heredoc that only ever existed in a terminal.
 WHAT IT REPORTS, and why in this order:
 
   1. Per-cell accuracy and outcome composition. `incomplete` / `unparsed` /
-     `error` counts matter as much as `correct`: decision 25 pre-registered a
+     `error` counts matter as much as `correct`: the pre-registration fixes a
      sensitivity analysis where the headline counts them wrong and a secondary
      restricts to clean terminations, and a differential rate across cells
      lands straight in the interaction.
@@ -76,7 +76,7 @@ def load(path):
 def dataset_of(by, fallback):
     """Which dataset the file says it is, or `fallback`.
 
-    m8_run now stamps every record. Records written before it did carry no
+    run.py now stamps every record. Records written before it did carry no
     field, so absence falls back to the flag instead of guessing -- and a file
     holding two datasets is refused rather than averaged.
     """
@@ -154,7 +154,7 @@ def main(argv=None):
     ap.add_argument("--file", default=None,
                     help="explicit generations file; otherwise built from "
                          "--dataset/--n/--band by scoring.run_path, the same "
-                         "function m8_run.py names its output with")
+                         "function run.py names its output with")
     ap.add_argument("--dataset", default="gsm8k",
                     choices=sorted(scoring.DATASETS),
                     help="only used to locate the default file and as the "

@@ -98,7 +98,7 @@ def test_complete_cases():
     print(f"ok   complete cases  paired on {len(ids)}/10, dropped {[3, 7]}")
 
 
-# ==================================================== FIX 8: loud failure
+# ======================================== empty cells must fail loudly
 def test_empty_cell_raises():
     """An ablated cell that produced nothing must NOT read as a clean null.
 
@@ -134,7 +134,7 @@ def test_no_overlap_raises():
     raise AssertionError("to_matrix accepted non-overlapping ids")
 
 
-# ============================== FIX 7: table must match the interaction
+# ============================== table must match the interaction
 def test_cell_table_complete_cases():
     """cell_table over all records disagrees with the paired analysis."""
     recs = []
@@ -171,7 +171,7 @@ def test_p_floor():
 
 
 def test_cap_warnings():
-    """FIX 5: a cap that binds only under ablation inflates the interaction."""
+    """A cap that binds only under ablation inflates the interaction."""
     rows = cell_table(synth(200, P_EFFECT,
                             hit_cap={"direct_intact": 0.0,
                                      "direct_ablated": 0.30,

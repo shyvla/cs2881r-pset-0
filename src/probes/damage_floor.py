@@ -1,7 +1,7 @@
 """The automatic-task damage floor -- is the model ablated, or just broken?
 
-    python m7_damage_floor.py            # real Qwen3-4B on mps
-    python m7_damage_floor.py --tiny     # weightless smoke test
+    python -m probes.damage_floor            # real Qwen3-4B on mps
+    python -m probes.damage_floor --tiny     # weightless smoke test
 
 WHAT THIS IS FOR. The assignment requires controls that separate a real
 J-space effect from broad degradation, and the paper's central claim has two
@@ -21,7 +21,7 @@ convenience -- it is what makes them the SAME measurement as the GSM8K direct
 condition. There the answer is the token straight after the "\\boxed{"
 prefill, so a top-1 flip at the last prefill position IS the accuracy effect,
 and one forward pass replaces a generation. The same holds here, so the floor
-costs seconds and reuses machinery Milestone 7 already verified.
+costs seconds and reuses machinery the calibration probe already verified.
 
   SST-2    sentiment. The cleanest example of the paper's "automatic"
            category: one pass, no intermediate results, nothing to write down.
@@ -32,7 +32,7 @@ costs seconds and reuses machinery Milestone 7 already verified.
            reported separately from SST-2 rather than pooled.
 
 READING IT. The comparison is against the GSM8K direct-condition flip rate
-from m7_calibration.py at the SAME band, k and projection settings:
+from probes/calibrate.py at the SAME band, k and projection settings:
 
   reasoning flips >> automatic flips     the ablation is selective
   reasoning flips ~= automatic flips     broad degradation; the J-space story
@@ -103,8 +103,9 @@ def is_correct(task, text):
     """Did the single top-1 token answer correctly?
 
     Deliberately strict and deliberately NOT math-verify: these are not math
-    answers, and decision 11's "one scoring path" is about the three math
-    datasets sharing a scorer, not about forcing a sentiment label through it.
+    answers, and scoring.py's "one scoring path" principle is about the three
+    math datasets sharing a scorer, not about forcing a sentiment label
+    through it.
     A first token that is neither label counts as wrong, which is the same
     convention the headline GSM8K accuracy uses for `incomplete`.
     """
@@ -176,10 +177,10 @@ def main(argv=None):
     ap.add_argument("--skip-sink", action="store_true",
                     help="spare position 0, the <|im_start|> attention sink "
                          "(266-363x median residual norm). Must match the "
-                         "m7_calibration.py run being compared against.")
+                         "probes/calibrate.py run being compared against.")
     ap.add_argument("--layers", default=None, metavar="LO-HI",
                     help="explicit window, overriding --band. Must match the "
-                         "m7_calibration.py run being compared against.")
+                         "probes/calibrate.py run being compared against.")
     ap.add_argument("--mode", default=None, choices=("each", "span"),
                     help="override config.PROJECTION_MODE; exploratory only")
     ap.add_argument("--gain", default=None, choices=("true", "false"),
@@ -204,7 +205,7 @@ def main(argv=None):
           f"{band.start}-{band.stop - 1}   k={K}   "
           f"projection={mode}/gain={gain}   "
           f"exclusion={'on' if use_ex else 'off'}")
-    print("Match these settings to the m7_calibration.py run you compare "
+    print("Match these settings to the probes/calibrate.py run you compare "
           "against;\nthe floor is only a floor at the same dose.\n")
 
     if a.tiny:
@@ -244,7 +245,7 @@ def main(argv=None):
 
     print("=" * 68)
     print("Compare the ablation rows against the GSM8K direct-condition flip")
-    print("rate from m7_calibration.py at the same band, k and projection.")
+    print("rate from probes/calibrate.py at the same band, k and projection.")
     print("A floor well BELOW the reasoning rate is the paper's result. A "
           "floor AT\nthe reasoning rate is broad degradation and the "
           "interaction, if any, is\nnot evidence for a workspace.")
