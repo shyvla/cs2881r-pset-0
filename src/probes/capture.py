@@ -20,7 +20,7 @@ from hooks import (Capture, band_from_depth, decoder_layers, final_norm,
                    hook_census, logit_lens, n_layers)
 
 from loaders import MODEL
-# Must match runs/gsm8k_manifest.json -> conditions.direct_intact, or the
+# Must match runs/archive/gsm8k_manifest.json -> conditions.direct_intact, or the
 # probe is measuring a condition that never ran. That is now enforced by
 # construction rather than by a copied string: config owns the one definition,
 # and DIRECT_FINGERPRINT below is the assertion that it still hashes to what

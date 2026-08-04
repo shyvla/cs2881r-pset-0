@@ -50,7 +50,7 @@ import config
 from hooks import Capture, n_layers, resolve_band, topk_tokens
 from loaders import load_real, load_tiny
 
-BASELINE = "runs/gsm8k_baseline.jsonl"
+BASELINE = "runs/archive/gsm8k_baseline.jsonl"
 # From the calibration run: direct condition, PREFILL positions, band 14-19.
 # The comparison this probe exists to make.
 #
