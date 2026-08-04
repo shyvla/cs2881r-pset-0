@@ -15,15 +15,17 @@ import sys
 
 import torch
 
+import config
 from hooks import (Capture, band_from_depth, decoder_layers, final_norm,
                    hook_census, logit_lens, n_layers)
 
 MODEL = "Qwen/Qwen3-4B"
 # Must match runs/gsm8k_manifest.json -> conditions.direct_intact, or the
-# probe is measuring a condition that never ran.
-DIRECT_SUFFIX = ("\n\nRespond with only the final numeric answer and nothing "
-                 "else. Do not show any reasoning.")
-DIRECT_PREFILL = "\\boxed{"
+# probe is measuring a condition that never ran. That is now enforced by
+# construction rather than by a copied string: config owns the one definition,
+# and DIRECT_FINGERPRINT below is the assertion that it still hashes to what
+# the committed manifest recorded.
+DIRECT_SUFFIX, DIRECT_PREFILL = config.direct_prompt("gsm8k")
 DIRECT_FINGERPRINT = "683d8ea5f9e42c80"
 QUESTION = ("Kelly has 5 quarters and 2 dimes. If she buys a can of pop for "
             "55 cents, how many cents will she have left?")

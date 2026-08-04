@@ -3,8 +3,17 @@
     python m8_run.py --n 1                     # time one problem, six cells
     python m8_run.py --n 150 --layers 26-31    # the run
     python m8_run.py --tiny                    # weightless wiring check
+    python m8_run.py --check-data --dataset math500   # no model, no GPU
 
 Resumable: re-running appends only what is missing, keyed by (id, cond).
+
+--dataset SELECTS THE DATASET, and did not always. It was accepted as a flag
+and then ignored: the loader, the gold field and the fingerprint all named
+GSM8K literally, so `--dataset math500` produced GSM8K problems, scored against
+GSM8K golds, in a file called m8_math500_*.jsonl. The pin file was the only
+thing that would have told you. Everything per-dataset now comes from
+scoring.DATASETS (how to read it) and config (caps and the prompt), and
+`--check-data` verifies the reading half before a GPU is involved.
 
 SIX CELLS, from the scoring.cond_name grid rather than typed out (decision 17):
 
@@ -51,25 +60,26 @@ import config
 from hooks import make_ablation, n_layers, resolve_band
 from m7_calibration import load_real, load_tiny
 
-DIRECT_SUFFIX = ("\n\nRespond with only the final numeric answer and nothing "
-                 "else. Do not show any reasoning.")
-DIRECT_PREFILL = "\\boxed{"
-
-
-def conditions():
+def conditions(dataset: str):
     """The six cells, as {name: (thinking, suffix, prefill, kind)}.
 
     `kind` is None for intact, else the hooks.make_ablation kind. Built from
     the grid so a cell cannot be omitted or misspelled.
+
+    The direct prompt comes from config.direct_prompt(dataset) -- it used to be
+    a module constant here, and three copies of the same string in the probes.
+    Calling it here also means an unset instruction stops the run at argument
+    time, before the model loads.
     """
     from scoring import cond_name
+    suffix, prefill = config.direct_prompt(dataset)
     out = {}
-    for level, (think, suffix, prefill) in (
-            ("direct", (False, DIRECT_SUFFIX, DIRECT_PREFILL)),
+    for level, (think, sfx, pre) in (
+            ("direct", (False, suffix, prefill)),
             ("cot", (True, "", ""))):
         for state, kind in (("intact", None), ("ablated", "ablate"),
                             ("random", "rand_tok")):
-            out[cond_name(level, state)] = (think, suffix, prefill, kind)
+            out[cond_name(level, state)] = (think, sfx, pre, kind)
     return out
 
 
@@ -106,7 +116,69 @@ def gate_check(path, cells, gate):
     return delta > gate["threshold"], msg
 
 
+def check_n(dataset, n):
+    """`n` against the RECORDED split length, before any network or model.
+
+    config.problem_ids already refuses n > dataset_size, but only once the split
+    is loaded -- which on aime24 means a download and a model load to discover
+    that the default n=150 was never possible against 30 problems. Checking the
+    recorded row count costs nothing and fails in the right place.
+    """
+    import scoring
+    rows = scoring.DATASETS[dataset]["rows"]
+    if n > rows:
+        raise SystemExit(
+            f"--n {n} exceeds {dataset}'s {rows} problems. AIME has 30, so "
+            f"n=150 is not meaningful there at all -- use --n {rows} and "
+            f"report it as the whole dataset rather than a sample.")
+
+
+def check_data(dataset, n):
+    """`--check-data`. Everything about a dataset that can be wrong for free.
+
+    Exists because the expensive failures here are all cheap to detect: a
+    renamed hub repo, a problem field called `problem` instead of `question`, a
+    gold format the scorer cannot parse, a cap or a prompt still unset. Every
+    one of them otherwise surfaces minutes into a rented GPU.
+    """
+    import scoring
+    check_n(dataset, n)
+    ds, path, name = scoring.load_problems(dataset)
+    ids_ = config.problem_ids(n, len(ds))
+    field = scoring.question_field(dataset, ds[ids_[0]])
+    bad = scoring.validate_gold(dataset, [ds[i] for i in ids_])
+    fp = scoring.dataset_fingerprint(ds, ids_)
+    print(f"{dataset}: {ds.num_rows} rows "
+          f"(scoring.DATASETS says {scoring.DATASETS[dataset]['rows']})")
+    print(f"  resolved mirror {path}" + (f"/{name}" if name else ""))
+    print(f"  problem field   {field!r}   of {sorted(ds[ids_[0]])}")
+    print(f"  sample          n={n}  ids {ids_[:5]}{'...' if n > 5 else ''}")
+    print(f"  content sha256  {fp['content_sha256']}")
+    gold = scoring.GOLD_FIELD[dataset](ds[ids_[0]])
+    print(f"  first gold      {gold!r}")
+    if bad:
+        print(f"  GOLD UNPARSEABLE on {len(bad)}/{n} problems: "
+              f"{[ids_[i] for i in bad[:5]]}")
+    else:
+        print(f"  gold parses     all {n}")
+    open_items = config.dataset_ready(dataset)
+    if open_items:
+        print(f"  NOT RUNNABLE -- unset pre-registration choices:")
+        for k in open_items:
+            print(f"      {k}")
+        print("  Set them in config.py and commit before generating.")
+    else:
+        print("  pre-registration complete for this dataset")
+    if ds.num_rows != scoring.DATASETS[dataset]["rows"]:
+        print(f"  WARNING: row count differs from the recorded "
+              f"{scoring.DATASETS[dataset]['rows']} -- a different split or "
+              f"release. Every sample id means a different problem than it did.")
+    return 1 if (bad or open_items) else 0
+
+
 def main(argv=None):
+    import scoring
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--tiny", action="store_true")
     ap.add_argument("--device", default=None)
@@ -115,7 +187,20 @@ def main(argv=None):
     ap.add_argument("--band", default=config.PRIMARY_BAND,
                     choices=sorted(config.BANDS))
     ap.add_argument("--layers", default=None, metavar="LO-HI")
-    ap.add_argument("--dataset", default="gsm8k")
+    ap.add_argument("--dataset", default="gsm8k",
+                    choices=sorted(scoring.DATASETS),
+                    help="selects the dataset for real. `choices` rather than "
+                         "a free string because the failure mode of a typo "
+                         "here used to be a silently-GSM8K run under another "
+                         "dataset's filename.")
+    ap.add_argument("--check-data", action="store_true",
+                    help="pre-flight the dataset and exit: load it, resolve "
+                         "which field holds the problem, parse every gold, "
+                         "report the pre-registration items still unset. No "
+                         "model, no GPU, no generation. Run this before "
+                         "renting anything -- scoring.DATASETS' entries for "
+                         "math500 and aime24 are published conventions this "
+                         "repo has never actually observed.")
     ap.add_argument("--only", default=None,
                     help="restrict to a level ('direct'|'cot') or a "
                          "comma-separated list of cell names. The file is "
@@ -131,6 +216,8 @@ def main(argv=None):
                          "cap is a pre-registered parameter (config.CAPS) and "
                          "not something a flag gets to change mid-experiment.")
     a = ap.parse_args(argv)
+    if a.check_data:
+        return check_data(a.dataset, a.n)
     device = a.device or ("cpu" if a.tiny else "mps")
     if a.smoke_cap and not a.tiny:
         raise SystemExit("--smoke-cap is --tiny only; the real run's caps come "
@@ -143,6 +230,21 @@ def main(argv=None):
     GATE = config.require("LOOP_GATE")
     USE_EX = config.require("USE_EXCLUSION")
     K, KX = config.K_ABLATE, config.EXCLUDE_TOPK
+    # Per-dataset choices, read here for the same reason: an unset cap or
+    # instruction should cost zero seconds, not one model load. conditions()
+    # resolves the prompt and cap_for every cell's cap, both raising on None.
+    if config.dataset_ready(a.dataset):
+        raise SystemExit(
+            f"{a.dataset} is not runnable -- unset pre-registration choices:\n"
+            + "\n".join(f"  {k}" for k in config.dataset_ready(a.dataset))
+            + f"\nSet them in config.py and commit first. "
+              f"`--check-data --dataset {a.dataset}` reports this without "
+              f"loading a model.")
+    CONDS = conditions(a.dataset)
+    for cond in CONDS:
+        config.cap_for(cond, a.dataset)
+    if not a.tiny:
+        check_n(a.dataset, a.n)
 
     model, tok = (load_tiny if a.tiny else load_real)(device)
     NL = n_layers(model)
@@ -152,8 +254,7 @@ def main(argv=None):
         raise SystemExit(str(e)) from None
     band_name = a.band if nm == "band" else nm
 
-    out = a.out or f"runs/m8_{a.dataset}_n{a.n}_{band_name}.jsonl".replace(
-        "(", "").replace(")", "")
+    out = a.out or scoring.run_path(a.dataset, a.n, band_name)
     os.makedirs("runs", exist_ok=True)
 
     print(f"band={band_name} {band.start}-{band.stop - 1} (width {len(band)})"
@@ -164,24 +265,36 @@ def main(argv=None):
         print("WARNING: --layers is an EXPLORATORY window, not a "
               "pre-registered band. Say so in the report.")
 
-    CONDS = conditions()
     if a.tiny:
-        ds, ids_, golds = None, list(range(min(a.n, 2))), {}
+        ds, ids_, golds, qfield = None, list(range(min(a.n, 2))), {}, None
     else:
-        from datasets import load_dataset
-        from scoring import GOLD_FIELD, dataset_fingerprint, model_revision
-        ds = load_dataset("openai/gsm8k", "main", split="test")
+        spec = scoring.DATASETS[a.dataset]
+        ds, path, name = scoring.load_problems(a.dataset)
         ids_ = config.problem_ids(a.n, len(ds))
-        golds = {i: GOLD_FIELD["gsm8k"](ds[i]) for i in ids_}
+        # Resolved ONCE, and before the loop: a wrong field name is then a
+        # pre-flight error naming the keys that do exist, not a KeyError on the
+        # first problem of the first cell with the model already resident.
+        qfield = scoring.question_field(a.dataset, ds[ids_[0]])
+        golds = {i: scoring.GOLD_FIELD[a.dataset](ds[i]) for i in ids_}
+        bad = scoring.validate_gold(a.dataset, [ds[i] for i in ids_])
+        if bad:
+            raise SystemExit(
+                f"{len(bad)}/{len(ids_)} gold answers do not parse "
+                f"({[ids_[i] for i in bad[:5]]}...). Every one of those "
+                f"problems is unscoreable in every cell, so generating them "
+                f"buys nothing. Fix GOLD_FIELD[{a.dataset!r}] in scoring.py, "
+                f"or check the split.")
         # Pinned BEFORE the first generation, not after the last: this run may
         # span an instance restart, and a checkpoint that resolves differently
         # between the first cell and the sixth is a confound with no signature
         # anywhere in the data.
-        prov = {"model_revision": model_revision(model),
-                "dataset": dataset_fingerprint(ds, ids_, path="openai/gsm8k",
-                                               name="main", split="test")}
+        prov = {"model_revision": scoring.model_revision(model),
+                "dataset": scoring.dataset_fingerprint(
+                    ds, ids_, dataset=a.dataset, path=path, name=name,
+                    split=spec["split"], question_field=qfield)}
         with open(out.replace(".jsonl", "_pin.json"), "w") as f:
             json.dump(prov, f, indent=1)
+        print(f"dataset={a.dataset} rows={ds.num_rows} question={qfield!r}")
         print(f"pinned revision {prov['model_revision']}   "
               f"content {prov['dataset']['content_sha256']}")
 
@@ -216,7 +329,7 @@ def main(argv=None):
     secs = {}
     for cond in order:
         think, suffix, prefill, kind = CONDS[cond]
-        cap = a.smoke_cap or config.cap_for(cond)
+        cap = a.smoke_cap or config.cap_for(cond, a.dataset)
         t_cell = time.time()
         nrec = 0
         for i in ids_:
@@ -226,9 +339,9 @@ def main(argv=None):
                 enc = {"input_ids": torch.randint(0, 256, (1, 12)).to(device)}
                 gold = "0"
             else:
-                from scoring import render_prompt
-                enc = tok(render_prompt(tok, ds[i]["question"], think, suffix,
-                                        prefill), return_tensors="pt").to(device)
+                enc = tok(scoring.render_prompt(tok, ds[i][qfield], think,
+                                                suffix, prefill),
+                          return_tensors="pt").to(device)
                 gold = golds[i]
             t0 = time.time()
             n_mod = 0
@@ -251,7 +364,8 @@ def main(argv=None):
                 n_mod = iv.n_modified
             raw = prefill + ("" if a.tiny else
                              tok.decode(body, skip_special_tokens=False))
-            rec = dict(id=i, cond=cond, seed=config.SEED, raw=raw, gold=gold,
+            rec = dict(id=i, cond=cond, dataset=a.dataset, seed=config.SEED,
+                       raw=raw, gold=gold,
                        n_tok=n_new, hit_cap=bool(n_new >= cap),
                        secs=round(time.time() - t0, 1),
                        # exposure, for the difficulty-length confound: harder

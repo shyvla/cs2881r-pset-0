@@ -89,37 +89,155 @@ def holdout_ids(n: int, dataset_size: int, seed: int = SEED) -> list[int]:
 
 # ---------------------------------------------------------------- generation
 
-# Keyed by LEVEL, not by full condition name. The cap is a property of how
-# much the condition writes, not of whether it is ablated, so the Half B
-# states (ablated, random) need no new entries. This is also what stops the
-# asymmetry `cap_warnings` was written to detect: a cap that binds in one
-# state and not its partner converts verbosity into wrongness.
+# Keyed by DATASET, then by LEVEL. The cap is a property of how much the
+# condition writes, not of whether it is ablated, so the Half B states
+# (ablated, random) need no new entries. This is also what stops the asymmetry
+# `cap_warnings` was written to detect: a cap that binds in one state and not
+# its partner converts verbosity into wrongness.
+#
+# PER-DATASET because every number below was calibrated on GSM8K and on nothing
+# else. MATH-500 and AIME problems are harder and their traces are longer, so
+# reusing GSM8K's caps would let the cap bind on one dataset and not another --
+# and `cap_warnings` cannot see that, because it compares cells WITHIN a run.
+# One constant with two meanings is the same silent-drift failure as CAPS
+# living in an unexecuted notebook cell.
 CAPS = {
-    "cot": 3072,
-    "nothink": 512,
-    # 32 -> 128. Decision 20 set 32 on the basis of "max observed was 7
-    # tokens", which was measured on INTACT runs only. Milestone 6 showed the
-    # cap binding on 100% of intervened direct generations. cap_warnings' own
-    # docstring already prescribed 128-256 for exactly this reason.
-    #
-    # The score is probably unaffected either way: the \boxed{ prefill closed
-    # at token 2 in both observed cases and extraction_mode="first_match"
-    # always takes that first box however much junk follows. But that is two
-    # observations of NOISE, not of the real ablation, and the case where the
-    # brace never closes inside the cap is reachable -- and there truncation
-    # really would be doing part of the work. 128 costs ~4 extra seconds per
-    # direct generation and removes the ambiguity.
-    "direct": 128,
+    "gsm8k": {
+        "cot": 3072,
+        "nothink": 512,
+        # 32 -> 128. Decision 20 set 32 on the basis of "max observed was 7
+        # tokens", which was measured on INTACT runs only. Milestone 6 showed
+        # the cap binding on 100% of intervened direct generations.
+        # cap_warnings' own docstring already prescribed 128-256 for exactly
+        # this reason.
+        #
+        # The score is probably unaffected either way: the \boxed{ prefill
+        # closed at token 2 in both observed cases and
+        # extraction_mode="first_match" always takes that first box however
+        # much junk follows. But that is two observations of NOISE, not of the
+        # real ablation, and the case where the brace never closes inside the
+        # cap is reachable -- and there truncation really would be doing part
+        # of the work. 128 costs ~4 extra seconds per direct generation and
+        # removes the ambiguity.
+        "direct": 128,
+    },
+    # UNDECIDED, and deliberately NOT copied from GSM8K. Both need a measured
+    # cap before any ablated data exists: run the intact cells first, read the
+    # hit_cap rate, set these above it with headroom. A guessed cap is cheap to
+    # write and expensive to discover, because a binding cap looks exactly like
+    # the ablation making the model fail to answer.
+    "math500": {"cot": None, "nothink": None, "direct": None},
+    "aime24": {"cot": None, "nothink": None, "direct": None},
 }
 
 
-def cap_for(cond: str) -> int:
-    """max_new_tokens for a condition name like 'direct_ablated'."""
+def cap_for(cond: str, dataset: str) -> int:
+    """max_new_tokens for a condition name like 'direct_ablated' on `dataset`.
+
+    `dataset` is REQUIRED and has no default. A default of "gsm8k" is precisely
+    the bug this signature exists to close: m8_run.py accepted a --dataset flag
+    and then loaded GSM8K regardless, so a MATH-500 run would have generated
+    GSM8K problems under a MATH-500 filename. A parameter that CAN be forgotten
+    eventually is.
+
+    Raises on an unset cap rather than returning None, because None reaches
+    model.generate as max_new_tokens=None -- which does not fail, it generates
+    to the context limit.
+    """
+    if dataset not in CAPS:
+        raise KeyError(f"no caps for dataset {dataset!r}; "
+                       f"known: {sorted(CAPS)}")
     level = cond.split("_")[0]
-    if level not in CAPS:
-        raise KeyError(f"no cap for level {level!r} (from cond {cond!r}); "
-                       f"known levels: {sorted(CAPS)}")
-    return CAPS[level]
+    if level not in CAPS[dataset]:
+        raise KeyError(f"no cap for level {level!r} (from cond {cond!r}) on "
+                       f"dataset {dataset!r}; known levels: "
+                       f"{sorted(CAPS[dataset])}")
+    cap = CAPS[dataset][level]
+    if cap is None:
+        raise ValueError(
+            f"CAPS[{dataset!r}][{level!r}] is unset -- an UNDECIDED "
+            f"pre-registration choice. Set it in config.py and commit before "
+            f"running ablated data; choosing a cap after seeing results is the "
+            f"post-hoc rescue that decision 25 exists to prevent.")
+    return cap
+
+
+# --------------------------------------------------- direct-condition prompt
+
+# THE one definition of the direct condition's instruction and prefill. This
+# string was copy-pasted into m5_probe, m6_probe, m7_calibration and m8_run --
+# the same "a constant written twice can drift" failure as CAPS in a notebook
+# cell, and worse here, because m5_probe asserts a prompt FINGERPRINT
+# (683d8ea5f9e42c80) against the committed run manifest: a one-word edit to any
+# single copy makes that probe describe a condition that never ran.
+#
+# The prefill is shared across datasets. All three want the answer in \boxed{},
+# and scoring's extraction_mode="first_match" is built on that.
+DIRECT_PREFILL = "\\boxed{"
+
+DIRECT_INSTRUCTION = {
+    # Byte-for-byte what the Milestone 4 and Milestone 8 GSM8K runs used. Do
+    # NOT reword it: runs/gsm8k_manifest.json and m5_probe.DIRECT_FINGERPRINT
+    # both pin this exact string, and the committed n=150 data stays comparable
+    # to later runs only while it holds.
+    "gsm8k": ("\n\nRespond with only the final numeric answer and nothing "
+              "else. Do not show any reasoning."),
+
+    # UNDECIDED. GSM8K's wording is WRONG here and must not be reused: it asks
+    # for "the final numeric answer", and MATH-500 answers frequently are not
+    # numeric -- \frac{3}{2}, 2\sqrt{2}, \frac{\pi}{2}, (2,5), intervals.
+    # test_scoring.py already carries all of those shapes, so the SCORER
+    # handles them; it is the PROMPT that would be instructing the model away
+    # from the format its own gold uses. That inflates `unparsed`, and it does
+    # so preferentially in the degraded (ablated) cells, which puts the
+    # artifact straight into the interaction term.
+    "math500": None,
+
+    # UNDECIDED, but nearly free: AIME answers ARE integers 0-999 (which
+    # scoring.validate_gold already enforces), so GSM8K's wording is
+    # semantically correct as written and can most likely be adopted verbatim.
+    # Left unset anyway, because "most likely" is not a pre-registration -- the
+    # point of this file is that the choice is made deliberately, in a commit,
+    # before the data exists.
+    "aime24": None,
+}
+
+
+def direct_prompt(dataset: str) -> tuple[str, str]:
+    """(suffix, prefill) for the direct condition on `dataset`.
+
+    Resolved in ONE place for the same reason `projection()` is: the probes and
+    the run loop must build an identical prompt, or a measurement describes a
+    different condition than the run it was taken to calibrate.
+    """
+    if dataset not in DIRECT_INSTRUCTION:
+        raise KeyError(f"no direct instruction for dataset {dataset!r}; "
+                       f"known: {sorted(DIRECT_INSTRUCTION)}")
+    suffix = DIRECT_INSTRUCTION[dataset]
+    if suffix is None:
+        raise ValueError(
+            f"DIRECT_INSTRUCTION[{dataset!r}] is unset -- an UNDECIDED "
+            f"pre-registration choice. Write the instruction in config.py and "
+            f"commit it before generating. A prompt chosen after seeing which "
+            f"wording scored better is decision 25's post-hoc rescue with "
+            f"extra steps.")
+    return suffix, DIRECT_PREFILL
+
+
+def dataset_ready(dataset: str) -> list[str]:
+    """Which per-dataset pre-registration choices are still unset.
+
+    Empty means the dataset can be run. The per-dataset counterpart to
+    `undecided()`, which covers top-level scalars: _UNDECIDED and require()
+    operate on module globals, and a nested table entry is not one. The
+    accessors above raise on their own behalf; this reports the same thing
+    without raising, for a pre-flight or a report appendix.
+    """
+    out = [f"CAPS[{dataset!r}][{lvl!r}]"
+           for lvl, cap in sorted(CAPS.get(dataset, {}).items()) if cap is None]
+    if DIRECT_INSTRUCTION.get(dataset, None) is None:
+        out.append(f"DIRECT_INSTRUCTION[{dataset!r}]")
+    return out
 
 
 # -------------------------------------------------------------- ablation band
@@ -294,9 +412,16 @@ UNUSABLE_OUTCOMES = ("incomplete", "unparsed", "error")
 # Only genuinely open items belong here. PROJECTION_MODE and
 # PROJECT_GAIN_SCALED were settled from m7_directions and the readout algebra;
 # their reasoning is above, where a later reader can disagree with it.
-# Empty: every pre-registration choice is settled, each with its measurement
-# recorded above. require() still raises on any None, so a constant that is
-# later unset -- or misspelled -- cannot pass silently.
+# Empty: every top-level pre-registration choice is settled, each with its
+# measurement recorded above. require() still raises on any None, so a constant
+# that is later unset -- or misspelled -- cannot pass silently.
+#
+# SCOPE. This dict holds module GLOBALS, which is all require() can reach. The
+# per-dataset tables (CAPS, DIRECT_INSTRUCTION) have open entries for math500
+# and aime24; those are nested, so they are gated by cap_for() and
+# direct_prompt() raising on their own behalf, and reported without raising by
+# dataset_ready(). "Empty" here therefore does NOT mean the whole
+# pre-registration is closed -- ask dataset_ready(d) per dataset.
 _UNDECIDED = {}
 
 
@@ -345,5 +470,8 @@ def projection(mode: str | None = None, gain: bool | None = None):
 
 
 def undecided() -> list[str]:
-    """Which pre-registration choices are still open."""
+    """Which top-level pre-registration choices are still open.
+
+    Globals only. For the nested per-dataset tables use dataset_ready(d).
+    """
     return [k for k in _UNDECIDED if globals().get(k, None) is None]

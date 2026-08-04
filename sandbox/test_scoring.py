@@ -233,6 +233,56 @@ def test_render_prompt_and_prefill():
     print("ok   render_prompt + prefill changes the fingerprint")
 
 
+def test_dataset_registry_is_complete_and_consistent():
+    """Every per-dataset table must cover the same three datasets.
+
+    A dataset present in one table and missing from another is how --dataset
+    used to half-work: the flag existed, DATASETS did not, and the loader named
+    GSM8K literally. Keys agreeing is the cheapest possible guard.
+    """
+    import config
+    from scoring import DATASETS, GOLD_FIELD
+    assert set(DATASETS) == set(GOLD_FIELD) == set(config.CAPS) \
+           == set(config.DIRECT_INSTRUCTION), (
+        sorted(DATASETS), sorted(GOLD_FIELD), sorted(config.CAPS),
+        sorted(config.DIRECT_INSTRUCTION))
+    for d, spec in DATASETS.items():
+        assert spec["mirrors"] and all(len(m) == 2 for m in spec["mirrors"]), d
+        assert spec["question"], d
+        assert spec["rows"] > 0, d
+    print("ok   dataset registry keys agree across scoring and config")
+
+
+def test_question_field_resolves_or_names_the_keys_it_found():
+    """Resolved once per run against a real record, so a wrong field name is a
+    pre-flight error listing the available keys -- not a KeyError on problem 1
+    with the model already resident, which is what ds[i]["question"] gave."""
+    from scoring import question_field
+    assert question_field("gsm8k", {"question": "q", "answer": "a"}) == "question"
+    assert question_field("math500", {"problem": "p", "answer": "a"}) == "problem"
+    # aime24 lists two candidates; either resolves
+    assert question_field("aime24", {"Problem": "p"}) == "Problem"
+    try:
+        question_field("gsm8k", {"prompt": "q"})
+    except KeyError as e:
+        assert "prompt" in str(e), e     # must report what it DID find
+        print("ok   question_field raises naming the available keys")
+        return
+    raise AssertionError("a missing question field must raise")
+
+
+def test_run_path_is_the_one_filename_construction():
+    """m8_run writes it and m8_analyze must find it. Built twice, they
+    eventually disagree and the analysis reads a different run."""
+    from scoring import run_path
+    assert run_path("gsm8k", 150, "light") == \
+           "runs/m8_gsm8k_n150_light.jsonl"          # the committed run
+    assert run_path("math500", 500, "light") == \
+           "runs/m8_math500_n500_light.jsonl"
+    assert "(" not in run_path("gsm8k", 12, "range14, 20")
+    print("ok   run_path")
+
+
 def test_provenance():
     tok = _StubTok()
     conds = {"cot_intact": (True, ""),
@@ -267,8 +317,11 @@ def _run_all():
     test_cond_names()
     test_unpack_cond()
     test_render_prompt_and_prefill()
+    test_dataset_registry_is_complete_and_consistent()
+    test_question_field_resolves_or_names_the_keys_it_found()
+    test_run_path_is_the_one_filename_construction()
     test_provenance()
-    print(f"\nALL PASS ({len(TESTS)} scoring cases + 9 unit tests)")
+    print(f"\nALL PASS ({len(TESTS)} scoring cases + 12 unit tests)")
 
 
 if __name__ == "__main__":

@@ -807,18 +807,77 @@ def test_directions_for_shape_and_gain_flag():
 def test_direct_cap_does_not_bind():
     """Milestone 6 saw the cap bind on 100% of intervened direct generations
     at 32. cap_warnings' own docstring prescribes 128-256."""
-    assert config.CAPS["direct"] >= 128, config.CAPS["direct"]
+    assert config.CAPS["gsm8k"]["direct"] >= 128, config.CAPS["gsm8k"]["direct"]
 
 
 def test_cap_for_is_keyed_by_level_so_ablated_states_need_no_entries():
+    caps = config.CAPS["gsm8k"]
     for state in ("intact", "ablated", "random"):
-        assert config.cap_for(f"direct_{state}") == config.CAPS["direct"]
-        assert config.cap_for(f"cot_{state}") == config.CAPS["cot"]
+        assert config.cap_for(f"direct_{state}", "gsm8k") == caps["direct"]
+        assert config.cap_for(f"cot_{state}", "gsm8k") == caps["cot"]
+    for bad, exc in ((("nonsense_intact", "gsm8k"), KeyError),
+                     (("direct_intact", "nonsense"), KeyError)):
+        try:
+            config.cap_for(*bad)
+        except exc:
+            continue
+        raise AssertionError(f"cap_for{bad} should have raised {exc.__name__}")
+
+
+def test_cap_for_requires_a_dataset():
+    """The signature IS the fix. m8_run.py accepted --dataset and then loaded
+    GSM8K anyway, so a MATH-500 run was GSM8K problems under a MATH-500
+    filename. A cap_for(cond) that defaulted to gsm8k would let exactly that
+    class of bug back in, silently."""
     try:
-        config.cap_for("nonsense_intact")
-    except KeyError:
+        config.cap_for("direct_intact")
+    except TypeError:
         return
-    raise AssertionError("unknown level should raise")
+    raise AssertionError("cap_for must not have a default dataset")
+
+
+def test_unset_caps_raise_rather_than_reaching_generate():
+    """max_new_tokens=None does not fail -- it generates to the context limit.
+    So an undecided cap must raise here, not return None."""
+    for d in ("math500", "aime24"):
+        try:
+            config.cap_for("direct_intact", d)
+        except ValueError:
+            continue
+        raise AssertionError(f"unset cap for {d} did not raise")
+
+
+def test_gsm8k_direct_prompt_is_byte_identical_to_what_ran():
+    """The committed n=150 data and m5_probe.DIRECT_FINGERPRINT both pin this
+    exact string. Centralising it into config must not have reworded it."""
+    suffix, prefill = config.direct_prompt("gsm8k")
+    assert suffix == ("\n\nRespond with only the final numeric answer and "
+                      "nothing else. Do not show any reasoning."), repr(suffix)
+    assert prefill == "\\boxed{", repr(prefill)
+
+
+def test_math500_prompt_is_not_silently_gsm8ks():
+    """GSM8K's wording asks for "the final numeric answer" and MATH-500
+    answers are frequently \\frac{3}{2}, 2\\sqrt{2}, (2,5). Inheriting it would
+    instruct the model away from the format its own gold uses, inflating
+    `unparsed` preferentially in the degraded cells."""
+    for d in ("math500", "aime24"):
+        try:
+            config.direct_prompt(d)
+        except ValueError:
+            continue
+        raise AssertionError(f"{d} returned a prompt it never pre-registered")
+
+
+def test_dataset_ready_reports_what_the_accessors_raise_on():
+    """_UNDECIDED and require() reach globals only, so the nested per-dataset
+    tables need their own reporting -- and it must agree with the accessors."""
+    assert config.dataset_ready("gsm8k") == [], config.dataset_ready("gsm8k")
+    for d in ("math500", "aime24"):
+        open_items = config.dataset_ready(d)
+        assert open_items, f"{d} claims to be runnable"
+        assert any("DIRECT_INSTRUCTION" in k for k in open_items), open_items
+        assert any("CAPS" in k for k in open_items), open_items
 
 
 def test_bands_translate_to_the_documented_layers():

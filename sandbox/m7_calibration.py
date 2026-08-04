@@ -45,9 +45,10 @@ from hooks import (Capture, Intervene, band_from_depth, directions_for,
                    topk_tokens)
 
 MODEL = "Qwen/Qwen3-4B"
-DIRECT_SUFFIX = ("\n\nRespond with only the final numeric answer and nothing "
-                 "else. Do not show any reasoning.")
-DIRECT_PREFILL = "\\boxed{"
+# From config, not a fourth copy of the string. These probes are GSM8K-only
+# measurements, so they ask for the GSM8K prompt explicitly. m7_directions
+# imports both names from here, which is why they stay module-level.
+DIRECT_SUFFIX, DIRECT_PREFILL = config.direct_prompt("gsm8k")
 
 # Measured in Milestone 6 on the real model, LIGHT band, direct prompt.
 NOISE_CURVE = [(0.004, 0.00011), (0.01, 0.00022), (0.03, 0.00060),

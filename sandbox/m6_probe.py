@@ -21,13 +21,13 @@ import sys
 
 import torch
 
+import config
 from hooks import (Capture, Intervene, add_noise, band_from_depth,
                    hook_census, n_layers)
 
 MODEL = "Qwen/Qwen3-4B"
-DIRECT_SUFFIX = ("\n\nRespond with only the final numeric answer and nothing "
-                 "else. Do not show any reasoning.")
-DIRECT_PREFILL = "\\boxed{"
+# The one definition, from config. GSM8K-only probe, so it names the dataset.
+DIRECT_SUFFIX, DIRECT_PREFILL = config.direct_prompt("gsm8k")
 # GSM8K test id 733: direct-correct AND cot-correct in 630 tokens, nothink in
 # 99. Chosen so degradation has somewhere to go -- id 286, the M5 probe
 # question, is already wrong in both conditions.

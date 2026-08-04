@@ -2,9 +2,15 @@
 Answer extraction and scoring for GSM8K / MATH-500 / AIME (Qwen3-4B).
 
 ONE scoring path for all three datasets. The only per-dataset code is how to
-pull the gold answer out of a record (GOLD_FIELD). Everything downstream --
+READ a record -- where to load it from, which field holds the problem, and how
+to pull the gold answer out (DATASETS, GOLD_FIELD). Everything downstream --
 extraction, normalization, equivalence -- is identical, so a difference in
 results across datasets cannot be an artifact of scoring.
+
+The per-dataset PROMPT and CAPS live in config.py instead, not here: those are
+numbers and wording that must be frozen before the data is seen, and config.py
+is the file whose require()/cap_for()/direct_prompt() accessors refuse to run
+when they are unset.
 
 DESIGN PRINCIPLE FOR EVERY FIX BELOW
 ------------------------------------
@@ -334,15 +340,110 @@ def distinct_ngram_ratio(text: str, n: int = 10) -> float:
 DEGENERATE_BELOW = 0.5
 
 
-# ============================================== per-dataset: gold only
+# ============================================== per-dataset: reading the data
 # The ONLY place the three datasets differ. Verify field names against the
-# loaded dataset before trusting them.
+# loaded dataset before trusting them -- `m8_run.py --check-data` does exactly
+# that, for free and without a GPU.
 
 GOLD_FIELD = {
     "gsm8k":   lambda r: r["answer"].split("####")[-1].strip(),
     "math500": lambda r: str(r["answer"]).strip(),
     "aime24":  lambda r: str(r["answer"]).strip(),
 }
+
+# How to LOAD each dataset and where the problem statement lives. Not a
+# pre-registration choice -- these are facts about the datasets, so they belong
+# here beside GOLD_FIELD rather than in config.py, which holds the numbers that
+# must be frozen before the data is seen.
+#
+# `mirrors` is tried in order, matching m7_damage_floor's SST-2/MMLU loaders:
+# hub repos get renamed and gated, and a run that dies on a 404 after the model
+# is resident has wasted the load.
+#
+# `question` is a TUPLE OF CANDIDATE FIELD NAMES, resolved against the actual
+# record by question_field() below, which raises listing the keys it did find.
+# The alternative -- one hardcoded name -- is what m8_run.py did with
+# ds[i]["question"], and it fails as a KeyError on the first problem of the
+# first cell, after the model has loaded.
+#
+# UNVERIFIED: only gsm8k has ever been downloaded in this repo (the HF cache
+# holds openai/gsm8k, cais/mmlu, stanfordnlp/sst2 and Qwen3-4B and nothing
+# else). The math500 and aime24 repo ids, splits and field names below are the
+# published conventions but have not been observed here. Run
+# `python m8_run.py --check-data --dataset math500` before trusting them; it
+# resolves the field name and parses every gold, and costs nothing.
+DATASETS = {
+    "gsm8k": {
+        "mirrors": (("openai/gsm8k", "main"), ("gsm8k", "main")),
+        "split": "test",
+        "question": ("question",),
+        "rows": 1319,
+    },
+    "math500": {
+        "mirrors": (("HuggingFaceH4/MATH-500", None),),
+        "split": "test",
+        "question": ("problem",),
+        "rows": 500,
+    },
+    "aime24": {
+        "mirrors": (("HuggingFaceH4/aime_2024", None),
+                    ("Maxwell-Jia/AIME_2024", None)),
+        "split": "train",
+        "question": ("problem", "Problem"),
+        "rows": 30,
+    },
+}
+
+
+def load_problems(dataset: str):
+    """Load a dataset's split, trying its mirrors in order.
+
+    Returns (ds, path, name) -- the RESOLVED mirror, not the preferred one,
+    because the manifest has to record where the data actually came from. Two
+    mirrors of "the same" dataset can differ in row order or normalisation, and
+    a pin file naming the primary while the fallback was used is exactly the
+    kind of provenance that is worse than none.
+
+    Raises with every mirror's failure rather than the last one's: a 404 from
+    the fallback tells you nothing about why the primary was skipped.
+    """
+    from datasets import load_dataset
+    spec = DATASETS[dataset]
+    errs = []
+    for path, name in spec["mirrors"]:
+        try:
+            return load_dataset(path, name, split=spec["split"]), path, name
+        except Exception as e:                       # noqa: BLE001 - reported
+            errs.append(f"{path}"
+                        + (f"/{name}" if name else "")
+                        + f": {type(e).__name__}: {e}")
+    raise RuntimeError(f"could not load {dataset!r} from any mirror:\n  "
+                       + "\n  ".join(errs))
+
+
+def question_field(dataset: str, record) -> str:
+    """Which field of `record` holds the problem statement.
+
+    Resolved ONCE per run, not per problem, so a wrong field name is a
+    pre-flight error rather than a crash on problem 1 after the model loads.
+    """
+    for f in DATASETS[dataset]["question"]:
+        if f in record:
+            return f
+    raise KeyError(
+        f"none of {DATASETS[dataset]['question']} is a field of {dataset!r}; "
+        f"available: {sorted(record)}. Fix DATASETS[{dataset!r}]['question'] "
+        f"in scoring.py -- the candidates there are published conventions, not "
+        f"something this repo has verified for every mirror.")
+
+
+def run_path(dataset: str, n: int, band: str) -> str:
+    """The generations file for a run. ONE construction, because m8_run.py
+    writes it and m8_analyze.py has to find it, and a filename built twice is
+    a filename that eventually disagrees -- with the analysis silently reading
+    a different run than the one just produced."""
+    return f"runs/m8_{dataset}_n{n}_{band}.jsonl".replace("(", "").replace(
+        ")", "")
 
 
 def validate_gold(dataset: str, records) -> list[int]:
