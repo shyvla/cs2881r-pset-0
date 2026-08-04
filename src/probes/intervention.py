@@ -165,7 +165,7 @@ def main(argv=None):
     check("exposure counted 1 position", iv.n_modified == 1, str(iv.n_modified))
 
     # ============================================ C: THE LANDMINE, behavioural
-    print("\nC. prefill vs generation (M5 said 97% of positions are prefill)")
+    print("\nC. prefill vs generation (capture probe: 97% of positions are prefill)")
     res = {}
     for scope in ("prefill", "generation", "both"):
         iv = Intervene(model, list(FULL), fn=add_noise(0.3), scope=scope)

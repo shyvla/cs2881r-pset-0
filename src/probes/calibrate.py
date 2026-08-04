@@ -254,7 +254,7 @@ def main(argv=None):
 
     ref = ratios[("span", True)]
     print(f"\n   reference variant span/gain-scaled: median {pct(ref,0.5):.3f}")
-    print(f"   per-position spread matters -- M5 found the mean residual norm "
+    print(f"   per-position spread matters -- the capture probe found the mean residual norm "
           f"hides\n   outlier positions. p99={pct(ref,0.99):.3f} "
           f"max={ref.max():.3f}")
 
