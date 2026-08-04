@@ -190,8 +190,14 @@ def main(argv=None):
           f"{'  completion' if not a.tiny else ''}")
     moved_logits = moved_text = None
     for alpha in (0.0, 1e-3, 4e-3, 1e-2, 3e-2, 1e-1, 3e-1, 1.0):
+        # Two contexts, not one: Intervene counts firings per layer, so a
+        # forward followed by a generate under the same instance makes the
+        # generate's prefill look like a non-prefill seq>1 firing and trips
+        # the NOCACHE guard. add_noise seeds by (call_idx, layer), so the
+        # prefill noise is identical across the two contexts.
         with Intervene(model, list(LIGHT), fn=add_noise(alpha)), torch.no_grad():
             lg = model(**enc).logits
+        with Intervene(model, list(LIGHT), fn=add_noise(alpha)), torch.no_grad():
             g = model.generate(**enc, max_new_tokens=32 if not a.tiny else 4)
         d = kl(clean[0, -1], lg[0, -1])
         same = bool(lg[0, -1].argmax() == clean[0, -1].argmax())
