@@ -992,12 +992,12 @@ def main(argv=None):
     # stall (HF_HOME unset, so the download is going to a small root disk)
     # visible without a second terminal.
     if not a.tiny:
-        cache = os.environ.get("HF_HOME") or "(unset: ~/.cache/huggingface)"
         print(f"loading {loaders.MODEL} @ {loaders.MODEL_REVISION[:12]} "
               f"onto {device}\n"
-              f"  HF_HOME={cache}\n"
-              f"  ~9 GB on a cold cache, several minutes, and no further "
-              f"output until it lands.", flush=True)
+              f"  HF_HOME={os.environ.get('HF_HOME') or '(unset)'}"
+              f"   HF_HUB_OFFLINE={os.environ.get('HF_HUB_OFFLINE') or '0'}\n"
+              f"  {loaders.cache_status()}\n"
+              f"  No further output until the weights land.", flush=True)
     model, tok = (load_tiny if a.tiny else load_real)(device)
     NL = n_layers(model)
     try:

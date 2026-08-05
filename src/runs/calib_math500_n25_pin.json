@@ -1,8 +1,14 @@
 {
  "model_revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+ "hardware": {
+  "device": "cuda",
+  "backend": "cuda",
+  "torch": "2.13.0+cu130",
+  "gpu": "NVIDIA GeForce RTX 5090"
+ },
  "dataset": {
   "rows": 500,
-  "fingerprint": "c4174c47ebc56e24",
+  "fingerprint": "f3124375297911ba",
   "download_size": 446564,
   "dataset": "math500",
   "path": "HuggingFaceH4/MATH-500",
@@ -37,5 +43,13 @@
    475
   ],
   "content_sha256": "81fc4a18bc3f3837"
- }
+ },
+ "hardware_history": [
+  {
+   "device": "cuda",
+   "backend": "cuda",
+   "torch": "2.13.0+cu130",
+   "gpu": "NVIDIA GeForce RTX 5090"
+  }
+ ]
 }

@@ -38,6 +38,36 @@ MODEL_REVISION = "1cfa9a7208912126459214e8b04321603b3df60c"
 BACKENDS = ("cpu", "cuda", "mps")
 
 
+def cache_status(model: str = MODEL, revision: str = MODEL_REVISION) -> str:
+    """Whether this exact snapshot is already on disk, as one printable line.
+
+    Exists because "no output for several minutes" means two opposite things.
+    A cold cache is a 9 GB download and normal; a WARM cache is ~20 seconds,
+    so the same silence is a stall -- and the usual cause is HF_HOME unset in
+    this shell, so the loader is looking at an empty default while the real
+    cache sits on the volume. A message that says "cold cache, be patient"
+    unconditionally tells you to wait through exactly the case you should kill.
+
+    Path-based rather than a Hub call, so it stays honest under
+    HF_HUB_OFFLINE=1 and costs nothing.
+    """
+    import os
+    root = (os.environ.get("HF_HUB_CACHE")
+            or os.path.join(os.environ.get("HF_HOME")
+                            or os.path.expanduser("~/.cache/huggingface"),
+                            "hub"))
+    snap = os.path.join(root, "models--" + model.replace("/", "--"),
+                        "snapshots", revision)
+    if os.path.isdir(snap):
+        return f"cached at {snap} -- loading should take seconds"
+    parent = os.path.dirname(os.path.dirname(snap))
+    if os.path.isdir(parent):
+        return (f"{parent} exists but NOT revision {revision[:12]} -- "
+                f"a different snapshot is cached; this will download")
+    return (f"NOT cached under {root} -- expect a ~9 GB download. If a cache "
+            f"exists elsewhere, HF_HOME is unset in this shell.")
+
+
 def backend_of(device: str) -> str:
     """'cuda:1' -> 'cuda'. The BACKEND is what determines the numerics, so it
     is what device-drift checks compare: moving a run between two cards of the
