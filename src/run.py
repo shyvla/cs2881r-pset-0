@@ -413,6 +413,75 @@ def write_pin(out, prov, allow_device_change=False, n_done=0, rehash=None):
     return prov
 
 
+def resume_scan(out, calib: bool, measure_cap=None,
+                check_ceiling: bool = True) -> set:
+    """The records already on disk, as {(id, cond)}, or refuse to resume.
+
+    Split out of main for the same reason write_pin was: the refusals here are
+    the cheap protection against expensive mistakes, and a branch that can only
+    be reached with a model resident is a branch that gets tested never.
+
+    Two refusals:
+
+      * STAMP MISMATCH. A calibration file and a run file are different
+        experiments -- different caps, and one of them has no intervention at
+        all. Resuming across the boundary would silently mix them, which is
+        the confound calib_path's separate namespace exists to prevent, so the
+        stamp is checked too and not just the name.
+
+      * STALE CEILING, calibration only. Raising config.MEASURE_CAP is the
+        prescribed response to a censored measurement -- but resume is keyed
+        by (id, cond) and will never regenerate what is already on disk. So a
+        re-run against records measured at the old ceiling either reports the
+        old censored distribution forever (nothing missing, nothing generated,
+        cap_report's advice loops) or generates only the missing records and
+        pools two ceilings into one "distribution". cap_report's MIXED
+        CEILINGS branch catches the second case, but only after the GPU
+        seconds are spent; this refuses both cases before any are.
+
+    `measure_cap` defaults to config.MEASURE_CAP and is a parameter only so
+    the refusal can be tested without editing config. `check_ceiling=False`
+    disables the second refusal ALONE -- `--smoke-cap` shrinks a tiny
+    calibration's ceiling on purpose, and the guard would misread that
+    throwaway file as a censored measurement. The stamp check is not
+    switchable: a tiny file that mixes calibration and run records is exactly
+    as mixed as a real one.
+    """
+    caps = config.MEASURE_CAP if measure_cap is None else measure_cap
+    done, old = set(), {}
+    with open(out) as f:
+        for line in f:
+            r = json.loads(line)
+            done.add((r["id"], r["cond"]))
+            if bool(r.get("calibration")) != calib:
+                raise SystemExit(
+                    f"{out} holds "
+                    f"{'calibration' if r.get('calibration') else 'run'} "
+                    f"records but this is a "
+                    f"{'calibration' if calib else 'run'} invocation. "
+                    f"They are generated at different caps and must not "
+                    f"be pooled -- write elsewhere or delete the file.")
+            if calib and check_ceiling:
+                level = r["cond"].split("_")[0]
+                ceiling = caps.get(level)
+                if ceiling and (r.get("cap") or 0) < ceiling:
+                    old.setdefault(level, set()).add(r.get("cap"))
+    if old:
+        raise SystemExit(
+            f"refusing to resume {out}: it holds calibration records "
+            f"measured at a LOWER\nceiling than the current "
+            f"config.MEASURE_CAP -- "
+            + "; ".join(f"{lvl} at {sorted(cs)} vs {caps[lvl]} now"
+                        for lvl, cs in sorted(old.items()))
+            + f".\nResume is keyed by (id, cond) and will never regenerate "
+              f"them, so re-running\nhere would report the old censored "
+              f"distribution again -- or, if any records\nare missing, pool "
+              f"two ceilings into one distribution. Delete the stale\n"
+              f"records (or the file and its _pin.json) and re-measure at "
+              f"one ceiling.")
+    return done
+
+
 GATE_MIN_N = 5
 
 
@@ -1035,23 +1104,7 @@ def main(argv=None):
 
     done = set()
     if os.path.exists(out):
-        with open(out) as f:
-            for line in f:
-                r = json.loads(line)
-                done.add((r["id"], r["cond"]))
-                # A calibration file and a run file are different experiments
-                # -- different caps, and one of them has no intervention at
-                # all. Resuming across the boundary would silently mix them,
-                # which is the confound calib_path's separate namespace exists
-                # to prevent, so the stamp is checked too and not just the name.
-                if bool(r.get("calibration")) != CALIB:
-                    raise SystemExit(
-                        f"{out} holds "
-                        f"{'calibration' if r.get('calibration') else 'run'} "
-                        f"records but this is a "
-                        f"{'calibration' if CALIB else 'run'} invocation. "
-                        f"They are generated at different caps and must not "
-                        f"be pooled -- write elsewhere or delete the file.")
+        done = resume_scan(out, CALIB, check_ceiling=not a.tiny)
         stale = {i for i, _ in done} - set(ids_)
         if stale:
             raise SystemExit(f"{out} holds ids outside this sample: "

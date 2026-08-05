@@ -277,6 +277,64 @@ def test_analyze_refuses_calibration_records():
     raise AssertionError("analyze.load must refuse calibration records")
 
 
+def _write_calib(d, cap, level="cot", n=3, calibration=True):
+    p = os.path.join(d, "calib.jsonl")
+    with open(p, "w") as f:
+        for i in range(n):
+            f.write(json.dumps({
+                "id": i, "cond": f"{level}_intact", "raw": "x", "gold": "7",
+                "n_tok": 10, "cap": cap, "hit_cap": False,
+                "calibration": calibration}) + "\n")
+    return p
+
+
+def test_resume_scan_refuses_a_calibration_at_a_stale_ceiling():
+    """Raising MEASURE_CAP is the prescribed response to censoring, but resume
+    is keyed by (id, cond) and will never regenerate what is on disk. Without
+    this refusal a re-run against the old file reports the old censored
+    distribution forever -- cap_report says "raise MEASURE_CAP", MEASURE_CAP
+    is already raised, and nothing anywhere says why nothing changes."""
+    with tempfile.TemporaryDirectory() as d:
+        p = _write_calib(d, cap=8192)
+        try:
+            run.resume_scan(p, calib=True, measure_cap={"cot": 16384})
+        except SystemExit as e:
+            assert "LOWER" in str(e) and "8192" in str(e), e
+            assert "16384" in str(e), e
+            return
+    raise AssertionError("a stale-ceiling calibration resume must refuse")
+
+
+def test_resume_scan_accepts_a_calibration_at_the_current_ceiling():
+    """...and records measured AT the ceiling resume normally -- the committed
+    calib files' direct arms sit at MEASURE_CAP['direct'] exactly, and the
+    guard must not orphan them."""
+    with tempfile.TemporaryDirectory() as d:
+        p = _write_calib(d, cap=16384)
+        done = run.resume_scan(p, calib=True, measure_cap={"cot": 16384})
+        assert done == {(0, "cot_intact"), (1, "cot_intact"),
+                        (2, "cot_intact")}
+        # check_ceiling=False is the --tiny/--smoke-cap escape hatch: the
+        # ceiling refusal alone is disabled, never the stamp check.
+        p2 = _write_calib(d, cap=8)
+        assert len(run.resume_scan(p2, calib=True,
+                                   measure_cap={"cot": 16384},
+                                   check_ceiling=False)) == 3
+
+
+def test_resume_scan_still_refuses_across_the_calibration_run_boundary():
+    """The stamp check moved from main into resume_scan; the boundary it
+    guards must not have moved with it."""
+    with tempfile.TemporaryDirectory() as d:
+        p = _write_calib(d, cap=16384, calibration=True)
+        try:
+            run.resume_scan(p, calib=False)
+        except SystemExit as e:
+            assert "calibration records" in str(e) and "pooled" in str(e), e
+            return
+    raise AssertionError("a run resume over calibration records must refuse")
+
+
 # ================================== analyze.py scores by the same policies
 
 def _write_run(d, recs, name="run.jsonl"):
