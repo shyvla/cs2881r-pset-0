@@ -215,6 +215,59 @@ def test_the_decision_24_gate_reads_the_ablated_cell_itself():
         assert not run.ablated_gate(p, gate, 20, n_left=130)
 
 
+def test_preflight_refuses_a_staged_cot_ablated_without_its_gate_pairs():
+    """The in-loop UNGUARDED warning arrives at problem gate-n, AFTER the
+    generations the gate exists to stop are paid for. A staged
+    `--only cot_ablated` against a file missing cot_intact -- one forgotten
+    merge on the multi-pod workflow -- must be refused before anything
+    generates."""
+    gate, ids_ = dict(config.LOOP_GATE), list(range(0, 100, 2))
+    try:
+        run.gate_preflight(["cot_ablated"], set(), ids_, gate, n=50)
+    except SystemExit as e:
+        assert "UNGUARDED" in str(e) and "merge_runs" in str(e), e
+    else:
+        raise AssertionError("an unguarded staged cell must refuse")
+    # pairs on disk for the gate window: guarded, no refusal
+    done = {(i, "cot_intact") for i in ids_[:gate["n"]]}
+    run.gate_preflight(["cot_ablated"], done, ids_, gate, n=50)
+    # a partial window is still unguarded
+    try:
+        run.gate_preflight(["cot_ablated"], set(list(done)[:-1]), ids_,
+                           gate, n=50)
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("a partial gate window must refuse too")
+
+
+def test_preflight_stays_out_of_the_gates_own_judgements(capsys):
+    """It refuses exactly the case the gate cannot see, and nothing else:
+    intact scheduled earlier in the same invocation, a run below GATE_MIN_N
+    (where the gate DECLINES by pre-registered design), tiny/calibration, a
+    cell already complete on disk, and an explicit --allow-unguarded are all
+    the gate's business, not the pre-flight's."""
+    gate, ids_ = dict(config.LOOP_GATE), list(range(0, 100, 2))
+    # cot_intact generated first by this same invocation (ORDER guarantees it)
+    run.gate_preflight(["cot_intact", "cot_random", "cot_ablated"], set(),
+                       ids_, gate, n=50)
+    # other cells only: nothing here to guard
+    run.gate_preflight(["cot_random"], set(), ids_, gate, n=50)
+    # below GATE_MIN_N the gate declines by design; the pre-flight defers to it
+    run.gate_preflight(["cot_ablated"], set(), ids_[:3], gate,
+                       n=run.GATE_MIN_N - 1)
+    # tiny and calibration have no gate at all
+    run.gate_preflight(["cot_ablated"], set(), ids_, gate, n=50, tiny=True)
+    run.gate_preflight(["cot_ablated"], set(), ids_, gate, n=50, calib=True)
+    # a complete cell has nothing left to protect; the in-loop gate still runs
+    done = {(i, "cot_ablated") for i in ids_}
+    run.gate_preflight(["cot_ablated"], done, ids_, gate, n=50)
+    # the override proceeds, loudly
+    run.gate_preflight(["cot_ablated"], set(), ids_, gate, n=50,
+                       allow_unguarded=True)
+    assert "UNGUARDED" in capsys.readouterr().out
+
+
 def test_gate_index_is_keyed_by_id_so_a_staged_resume_cannot_skip_it():
     """The gate is attached to the cell it protects, by problem id: a
     `--only cot_ablated` resume over a warm file hits it exactly where a

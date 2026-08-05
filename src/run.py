@@ -92,6 +92,12 @@ check survives as a free secondary tripwire after cot_random: both cells it
 reads are on disk by then, and broad degradation under random directions is
 worth stopping for even though it is not what decision 24 gates.
 
+A staged `--only cot_ablated` invocation whose gate pairs are not on disk is
+refused at pre-flight (gate_preflight) rather than warned about at problem
+gate-n, because the warning arrives only after the generations the gate
+exists to stop are paid for. Merge cot_intact in first (merge_runs.py);
+--allow-unguarded overrides and must be disclosed.
+
 COST. With config.USE_EXCLUSION True every J-space-ablated generation runs a
 second clean forward pass per token, so cot_ablated costs roughly 2x the
 intact cell plus the per-position projection. The random cells skip the clean
@@ -566,6 +572,61 @@ def ablated_gate(path, gate, n_run, n_left):
     return fired
 
 
+def gate_preflight(order, done, ids, gate, n, allow_unguarded=False,
+                   tiny=False, calib=False):
+    """Refuse the staged invocation decision 24 cannot guard, BEFORE it
+    generates anything.
+
+    ablated_gate already notices the missing-pairs case -- but at problem
+    gate-n, AFTER the gate-window generations are paid for, and only as a
+    warning: a staged `--only cot_ablated` against a file with no cot_intact
+    printed UNGUARDED and then generated the most expensive cell anyway. On
+    one machine ORDER makes that sequence impossible; on the staged multi-pod
+    workflow (arms generated in parallel, merged, then cot_ablated -- see
+    merge_runs.py) it is one forgotten merge away, and the price of the
+    mistake is the 2x-per-token cell the gate exists to stop. A refusal here
+    costs a model load; the warning it replaces costs the gate window.
+
+    Refuses iff this invocation will generate cot_ablated records while the
+    gate's intact pairs are neither on disk nor scheduled earlier in this
+    same invocation. It never second-guesses the gate's own pre-registered
+    judgements: below GATE_MIN_N the gate DECLINES by design and this stays
+    out of it; --tiny and calibration have no gate at all; and a cell already
+    complete on disk has nothing left to protect (the in-loop gate still
+    reads it and can still return 3). --allow-unguarded proceeds with the
+    same UNGUARDED language the loop prints, and the report must say so.
+    """
+    if tiny or calib or "cot_ablated" not in order:
+        return
+    if "cot_intact" in order:
+        return  # ORDER puts intact first, so the pairs exist by gate time
+    want = min(gate["n"], n)
+    if want < GATE_MIN_N:
+        return
+    if all((i, "cot_ablated") in done for i in ids):
+        return
+    missing = [i for i in ids[:want] if (i, "cot_intact") not in done]
+    if not missing:
+        return
+    if allow_unguarded:
+        print(f"WARNING: --allow-unguarded -- cot_ablated generates "
+              f"UNGUARDED, with {len(missing)}/{want} of its gate pairs "
+              f"absent, so decision 24 cannot run. The report must disclose "
+              f"this.")
+        return
+    raise SystemExit(
+        f"refusing to generate cot_ablated UNGUARDED: cot_intact is missing "
+        f"for {len(missing)} of the first {want} problems "
+        f"({missing[:5]}{'...' if len(missing) > 5 else ''}), so the "
+        f"pre-registered gate (decision 24) could not run until after the "
+        f"generations it exists to stop were already paid for.\n"
+        f"Generate cot_intact into this file first -- on the staged "
+        f"multi-pod workflow that is\n"
+        f"    python merge_runs.py <pod files...> --out <this file>\n"
+        f"before the cot_ablated invocation -- or pass --allow-unguarded to "
+        f"proceed anyway and say so in the report.")
+
+
 def cap_report(path, dataset):
     """`--calibrate-caps`' actual output: what CAPS entries to commit.
 
@@ -849,6 +910,15 @@ def main(argv=None):
                          "differenced against each other must come from one "
                          "backend. When passed, the pin records both devices "
                          "and the report has to disclose it.")
+    ap.add_argument("--allow-unguarded", action="store_true",
+                    help="permit a staged `--only cot_ablated` invocation to "
+                         "generate without the gate's cot_intact pairs on "
+                         "disk. Refused by default: decision 24's gate would "
+                         "otherwise first run AFTER the generations it "
+                         "exists to stop were paid for, and only as a "
+                         "warning. Merge cot_intact in first (merge_runs.py) "
+                         "for a guarded run; when passed, the report must "
+                         "disclose the unguarded cell.")
     ap.add_argument("--n", type=int, default=None,
                     help="problems to run. Defaults to the PRE-REGISTERED "
                          "config.N_DEFAULT[dataset] -- 150 was an argparse "
@@ -1110,6 +1180,13 @@ def main(argv=None):
             raise SystemExit(f"{out} holds ids outside this sample: "
                              f"{sorted(stale)[:5]}... refusing to mix samples")
         print(f"resuming: {len(done)} records on disk")
+
+    # BEFORE the pin is written and anything generates: a staged cot_ablated
+    # invocation whose gate pairs are absent is refused here, while the
+    # mistake still costs nothing but a model load. See gate_preflight.
+    gate_preflight(order, done, ids_, GATE, n,
+                   allow_unguarded=a.allow_unguarded, tiny=a.tiny,
+                   calib=CALIB)
 
     if not a.tiny:
         # AFTER the resume scan, so a mismatch is reported against the number
