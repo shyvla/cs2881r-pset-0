@@ -69,6 +69,27 @@ def parse_cond(cond: str) -> tuple[str, str]:
     return level, state
 
 
+# Whether each level's generations carry a reasoning trace. Scoring needs the
+# flag: score_detail must know whether a missing </think> means "unfinished
+# answer" or "there was never a trace to close". run.conditions() builds its
+# prompt specs with these same flags; test_run pins the two against each other.
+LEVEL_THINKING = {"cot": True, "nothink": False, "direct": False}
+
+
+def thinking_of(cond: str) -> bool:
+    """The `thinking` flag for a condition name, resolved from the grid.
+
+    Replaces three hand-rolled `cond.startswith("cot")` call sites
+    (analyze.load, run.gate_check, run.cap_report). The prefix test happened
+    to be right for the current grid and silently WRONG for the archived
+    letter naming -- "A_cot" IS a cot cell and startswith said it was not --
+    which is the exact drift cond_name exists to prevent. Off-grid names
+    raise (via parse_cond) instead of guessing.
+    """
+    level, _ = parse_cond(cond)
+    return LEVEL_THINKING[level]
+
+
 def unpack_cond(spec) -> tuple[bool, str, str]:
     """A condition spec is (thinking, suffix) or (thinking, suffix, prefill).
 
@@ -753,9 +774,19 @@ def score_file(gen_path: str, scores_path: str, conditions: dict,
         print(f"scored {len(out)} records -> {scores_path}")
         n_norm = sum(r["normalized"] for r in out)
         if n_norm:
+            # Per cell, not pooled: the pooled rate answers no question that
+            # matters. A uniform rescue rate is harmless; an asymmetric one is
+            # a differential bias, and only this breakdown can show which.
+            per = {}
+            for r in out:
+                k, n = per.setdefault(r["cond"], [0, 0])
+                per[r["cond"]] = [k + r["normalized"], n + 1]
             print(f"  {n_norm} answers ({n_norm / len(out):.1%}) recovered by "
-                  f"markdown normalisation -- verify this rate is SIMILAR "
-                  f"across cells; an asymmetric rate is a differential bias")
+                  f"markdown normalisation, by cell:")
+            for c in sorted(per):
+                k, n = per[c]
+                print(f"    {c:16} {k}/{n} ({k / n:.1%})")
+            print(f"  an asymmetric rate across cells is a differential bias")
         if errors:
             print(f"  {len(errors)} SCORING ERRORS (outcome='error'):")
             for e in errors[:5]:

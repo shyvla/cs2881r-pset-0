@@ -231,6 +231,131 @@ def test_analyze_refuses_calibration_records():
     raise AssertionError("analyze.load must refuse calibration records")
 
 
+# ================================== analyze.py scores by the same policies
+
+def _write_run(d, recs, name="run.jsonl"):
+    p = os.path.join(d, name)
+    with open(p, "w") as f:
+        for r in recs:
+            f.write(json.dumps(r) + "\n")
+    return p
+
+
+def test_analyze_load_scores_errors_and_carries_normalized():
+    """load() must apply scoring.py's own policies: a record that raises
+    becomes outcome='error' (never a crash, never silently dropped), the
+    markdown-rescue flag is carried through so it can be reported PER CELL,
+    and `thinking` comes from the grid -- an unclosed trace in a cot cell is
+    incomplete, not graded."""
+    import analyze
+    with tempfile.TemporaryDirectory() as d:
+        p = _write_run(d, [
+            {"id": 0, "cond": "direct_intact", "raw": "**72**", "gold": "72",
+             "hit_cap": False},
+            {"id": 1, "cond": "direct_intact", "raw": "72", "gold": "72",
+             "hit_cap": False},
+            # empty gold raises inside score_detail -> outcome='error'
+            {"id": 2, "cond": "direct_intact", "raw": "72", "gold": "",
+             "hit_cap": False},
+            {"id": 0, "cond": "cot_intact", "raw": "<think>I think 72",
+             "gold": "72", "hit_cap": False},
+        ])
+        by, errors = analyze.load(p)
+    di = by["direct_intact"]
+    assert di[0][1] == "correct" and di[0][3]["normalized"] is True
+    assert di[1][1] == "correct" and di[1][3]["normalized"] is False
+    assert di[2][1] == "error" and di[2][0] == 0
+    assert len(errors) == 1 and errors[0][0] == 2, errors
+    assert by["cot_intact"][0][1] == "incomplete"
+    print("  ok    analyze.load: error outcome + normalized carried per record")
+
+
+def test_analyze_load_refuses_an_off_grid_cond():
+    """startswith('cot') silently mis-scored archived letter-named files --
+    'A_cot' IS a cot cell and the prefix test said it was not, so its traces
+    would have been graded as answers. Off-grid names refuse loudly now."""
+    import analyze
+    with tempfile.TemporaryDirectory() as d:
+        p = _write_run(d, [{"id": 0, "cond": "A_cot", "raw": "72",
+                            "gold": "72", "hit_cap": False}])
+        try:
+            analyze.load(p)
+        except SystemExit as e:
+            assert "A_cot" in str(e), e
+            print("  ok    analyze.load refuses off-grid condition names")
+            return
+    raise AssertionError("analyze.load must refuse off-grid condition names")
+
+
+def test_conditions_thinking_flags_agree_with_the_grid():
+    """run.conditions() builds (thinking, ...) specs from its own table;
+    scoring.thinking_of resolves the same flag for consumers that only have
+    the cond name. If the two tables drift, analyze.py scores a cell under
+    the wrong stripping rule -- silently."""
+    conds = run.conditions("gsm8k", levels=list(scoring.LEVELS))
+    assert len(conds) == len(scoring.LEVELS) * len(scoring.STATES)
+    for name, (think, *_rest) in conds.items():
+        assert think == scoring.thinking_of(name), name
+    print("  ok    run.conditions' thinking flags match scoring.thinking_of")
+
+
+def test_analyze_main_reports_norm_and_errors_per_cell():
+    """The report must surface the markdown-rescue rate per cell (the check
+    scoring.py's design principle demands and nothing previously computed)
+    and scoring errors -- not swallow either."""
+    import contextlib
+    import io
+
+    import analyze
+    with tempfile.TemporaryDirectory() as d:
+        p = _write_run(d, [
+            {"id": 0, "cond": "direct_intact", "raw": "**72**", "gold": "72",
+             "hit_cap": False, "dataset": "gsm8k"},
+            {"id": 1, "cond": "direct_intact", "raw": "71", "gold": "72",
+             "hit_cap": False, "dataset": "gsm8k"},
+            {"id": 2, "cond": "direct_intact", "raw": "70", "gold": "",
+             "hit_cap": False, "dataset": "gsm8k"},
+        ])
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = analyze.main(["--file", p])
+    out = buf.getvalue()
+    assert rc == 0, out
+    assert "norm" in out, out                       # the per-cell column
+    assert "markdown rescue" in out, out            # the cross-cell spread
+    assert "outcome='error'" in out, out            # the scoring failure
+    assert "error=1" in out, out                    # ...in the composition
+    print("  ok    analyze.main reports norm column, rescue spread, errors")
+
+
+def test_analyze_reports_nothink_cells():
+    """analyze.py's LEVELS used to be a hand-typed ('direct', 'cot'), so a
+    nothink cell loaded but appeared in no table: the header said it was
+    present and no number for it existed anywhere. The middle rung of the
+    externalisation axis must be reported wherever it was run."""
+    import contextlib
+    import io
+
+    import analyze
+    with tempfile.TemporaryDirectory() as d:
+        recs = []
+        for i in range(5):
+            recs.append({"id": i, "cond": "nothink_intact", "raw": "72",
+                         "gold": "72", "hit_cap": False, "dataset": "gsm8k"})
+            recs.append({"id": i, "cond": "nothink_ablated",
+                         "raw": "72" if i < 2 else "71", "gold": "72",
+                         "hit_cap": False, "dataset": "gsm8k"})
+        p = _write_run(d, recs)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = analyze.main(["--file", p])
+    out = buf.getvalue()
+    assert rc == 0, out
+    assert "nothink_intact" in out and "nothink_ablated" in out, out
+    assert "NOTHINK ARM" in out, out                # paired comparison ran
+    print("  ok    analyze.main reports nothink cells and their arm")
+
+
 def test_cap_report_flags_a_censored_distribution():
     """The load-bearing number. Any hit at the ceiling means the observed tail
     is not the real tail, so every quantile -- and the suggestion built on it

@@ -195,6 +195,28 @@ def test_cond_names():
     print("ok   condition naming grid")
 
 
+def test_thinking_of():
+    """`thinking` is a property of the LEVEL, resolved from the grid. Three
+    call sites (analyze.load, run.gate_check, run.cap_report) used to
+    hand-roll cond.startswith("cot") -- right for this grid, silently wrong
+    for the archived letter naming, where "A_cot" IS a cot cell. Getting the
+    flag wrong scores the reasoning trace as if it were the answer."""
+    from scoring import LEVEL_THINKING, LEVELS, thinking_of
+    assert set(LEVEL_THINKING) == set(LEVELS), (
+        sorted(LEVEL_THINKING), sorted(LEVELS))
+    assert thinking_of("cot_intact") is True
+    assert thinking_of("cot_ablated") is True
+    assert thinking_of("direct_intact") is False
+    assert thinking_of("nothink_random") is False
+    for bad in ("A_cot", "cot", "cotintact", "cot_broken"):
+        try:
+            thinking_of(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad!r} must not resolve to a thinking flag")
+    print("ok   thinking_of resolves from the grid, refuses off-grid names")
+
+
 class _StubTok:
     """Stands in for a HF tokenizer so provenance is testable offline."""
     def apply_chat_template(self, msgs, tokenize, add_generation_prompt,
@@ -356,6 +378,7 @@ def _run_all():
     test_normalisation_is_fallback_only()
     test_degeneracy()
     test_cond_names()
+    test_thinking_of()
     test_unpack_cond()
     test_render_prompt_and_prefill()
     test_dataset_registry_is_complete_and_consistent()
@@ -364,7 +387,7 @@ def _run_all():
     test_run_path_is_the_one_filename_construction()
     test_resolve_anchors_a_run_name_to_src_from_any_cwd()
     test_provenance()
-    print(f"\nALL PASS ({len(TESTS)} scoring cases + 13 unit tests)")
+    print(f"\nALL PASS ({len(TESTS)} scoring cases + 15 unit tests)")
 
 
 if __name__ == "__main__":

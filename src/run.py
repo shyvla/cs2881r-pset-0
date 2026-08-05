@@ -328,7 +328,7 @@ def gate_check(path, cells, gate, n_run=None):
     than an absent one. Below GATE_MIN_N even that is noise, so it declines
     explicitly rather than firing on one problem.
     """
-    from scoring import score
+    from scoring import score, thinking_of
     bad = set(config.UNUSABLE_OUTCOMES)
     recs = {}
     with open(path) as f:
@@ -355,7 +355,7 @@ def gate_check(path, cells, gate, n_run=None):
         for i in shared:
             r = store[i]
             o = score(r["raw"], r["gold"], hit_cap=r["hit_cap"],
-                      thinking=r["cond"].startswith("cot"))[0]
+                      thinking=thinking_of(r["cond"]))[0]
             n += o in bad
         return n / len(shared)
 
@@ -400,7 +400,7 @@ def cap_report(path, dataset):
     def unusable_rate(recs):
         return sum(
             scoring.score(r["raw"], r["gold"], hit_cap=r["hit_cap"],
-                          thinking=r["cond"].startswith("cot"))[0] in bad
+                          thinking=scoring.thinking_of(r["cond"]))[0] in bad
             for r in recs) / len(recs)
 
     print(f"\n{'=' * 72}\nCAP CALIBRATION -- {dataset}\n{'=' * 72}")
@@ -409,14 +409,25 @@ def cap_report(path, dataset):
           "down.\n")
     print(f"{'level':9}{'n':>4}{'p50':>7}{'p90':>7}{'p99':>7}{'max':>7}"
           f"{'ceiling':>9}{'hit':>6}{'unusable':>10}   suggest")
-    censored, suggestions, empty = [], {}, []
+    censored, suggestions, empty, mixed = [], {}, [], []
     for level in sorted(by):
         recs = [r for r in by[level] if r.get("calib_role") != "contrast"]
         if not recs:                      # contrast-only level: nothing to size
             empty.append(level)
             continue
         toks = sorted(r["n_tok"] for r in recs)
-        ceiling = recs[0].get("cap", config.MEASURE_CAP.get(level))
+        # EVERY record's ceiling, not the first one's. Raising MEASURE_CAP and
+        # re-running is the prescribed response to a censored measurement, and
+        # resume is keyed by (id, cond) -- so a file can end up holding records
+        # generated at two different ceilings, whose n_tok values are not one
+        # distribution. Reading recs[0] reported whichever came first and
+        # pooled them silently, which is the same failure as pooling two
+        # backends.
+        ceilings = sorted({r.get("cap", config.MEASURE_CAP.get(level))
+                           for r in recs})
+        if len(ceilings) > 1:
+            mixed.append((level, ceilings))
+        ceiling = max(ceilings)
         q = lambda p: toks[min(len(toks) - 1, int(p * len(toks)))]
         hit = sum(r["hit_cap"] for r in recs) / len(recs)
         sug = config.suggest_cap(toks)
@@ -488,6 +499,17 @@ def cap_report(path, dataset):
     print(f"\nsuggestion = {config.CAP_HEADROOM}x p99 of the CAP SAMPLE, "
           f"rounded up to a multiple\nof {config.CAP_ROUNDING} "
           f"(config.suggest_cap)")
+    if mixed:
+        print("\nMIXED CEILINGS -- this file holds records generated at more "
+              "than one\nmax_new_tokens, so its n_tok values are not one "
+              "distribution:")
+        for level, cs in mixed:
+            print(f"  {level}: {cs}")
+        print("  Raising MEASURE_CAP and re-running is the right response to "
+              "censoring, but\n  resume is keyed by (id, cond) and will not "
+              "regenerate what is already on\n  disk. Delete the file and "
+              "re-measure at one ceiling.")
+        return 1
     if broken:
         return 1
     if censored:
@@ -740,6 +762,20 @@ def main(argv=None):
     if not a.tiny and not CALIB:
         check_n(a.dataset, n)
 
+    # BEFORE the load, and flushed. Every print this script makes used to come
+    # after from_pretrained, so on a fresh instance the first ~9 GB and several
+    # minutes produced no output of its own and the run was indistinguishable
+    # from a hang -- the one moment a user is most likely to kill it. Naming the
+    # device and the cache location here also makes the usual cause of a genuine
+    # stall (HF_HOME unset, so the download is going to a small root disk)
+    # visible without a second terminal.
+    if not a.tiny:
+        cache = os.environ.get("HF_HOME") or "(unset: ~/.cache/huggingface)"
+        print(f"loading {loaders.MODEL} @ {loaders.MODEL_REVISION[:12]} "
+              f"onto {device}\n"
+              f"  HF_HOME={cache}\n"
+              f"  ~9 GB on a cold cache, several minutes, and no further "
+              f"output until it lands.", flush=True)
     model, tok = (load_tiny if a.tiny else load_real)(device)
     NL = n_layers(model)
     try:

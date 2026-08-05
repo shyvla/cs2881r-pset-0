@@ -15,7 +15,11 @@ WHAT IT REPORTS, and why in this order:
      `error` counts matter as much as `correct`: the pre-registration fixes a
      sensitivity analysis where the headline counts them wrong and a secondary
      restricts to clean terminations, and a differential rate across cells
-     lands straight in the interaction.
+     lands straight in the interaction. The `norm` column counts answers the
+     markdown fallback rescued, reported per cell for the same reason: a
+     uniform rescue rate is harmless and an asymmetric one is a bias, and
+     scoring.py's comment demanding that comparison was, until here, a
+     comparison nothing computed.
 
   2. SELECTIVITY, for whichever arms are present. This is the contrast the
      paper's own control defines: does removing the top-10 J-lens directions
@@ -60,16 +64,38 @@ import numpy as np
 import config
 import scoring
 from analysis import mcnemar, paired_bootstrap
-from scoring import score
+from scoring import score_detail
 
-LEVELS = ("direct", "cot")
-STATES = ("intact", "ablated", "random")
+# The grid, from scoring -- a hand-typed copy here was ("direct", "cot"),
+# which silently dropped any nothink cell from every table: the file loaded,
+# the header said the cell was present, and no number for it appeared
+# anywhere. The INTERACTION is a different matter: it is pre-registered over
+# the outer two rungs of the externalisation axis, so that pair stays
+# explicit. nothink, if present, is reported per-cell and per-arm only.
+LEVELS = scoring.LEVELS
+STATES = scoring.STATES
+INTERACTION_ARMS = ("direct", "cot")
 
 
 def load(path):
-    """Score every record. `thinking` follows the cell, because strip_think
-    must know whether to expect a <think> block -- getting that wrong silently
-    scores the trace instead of the answer.
+    """Score every record -> (by, errors). `thinking` follows the cell,
+    because strip_think must know whether to expect a <think> block -- getting
+    that wrong silently scores the trace instead of the answer. It is resolved
+    by scoring.thinking_of, from the condition grid: the old startswith("cot")
+    was right for the current grid and silently wrong for the archived letter
+    naming ("A_cot" IS a cot cell), so an off-grid name now refuses loudly
+    rather than guessing a stripping rule.
+
+    `by` maps cond -> id -> (correct, outcome, record, detail), where `detail`
+    is scoring.score_detail's dict -- carried through because `normalized` (the
+    markdown rescue) has to be reported PER CELL: scoring.py's own design
+    principle is that only an asymmetric rescue rate is a bias, and a check
+    nothing computes is a check that does not happen.
+
+    A record that raises during scoring becomes outcome="error" and an entry in
+    `errors`, exactly as scoring.score_file does it: one malformed record must
+    not take down the analysis of an hour of generation, and "error" is a
+    pre-registered outcome, not an excuse to drop the row.
 
     REFUSES CALIBRATION FILES. `run.py --calibrate-caps` writes intact cells
     generated at the config.MEASURE_CAP ceiling rather than at the
@@ -79,7 +105,7 @@ def load(path):
     was differenced against. The separate filename makes that unlikely; the
     stamp makes it impossible.
     """
-    by = {}
+    by, errors = {}, []
     for line in open(path):
         r = json.loads(line)
         if r.get("calibration"):
@@ -88,10 +114,23 @@ def load(path):
                 f"{r.get('cond')}), generated at the config.MEASURE_CAP "
                 f"ceiling and not at a pre-registered cap. They are not run "
                 f"data and nothing here will analyse them.")
-        o, *_ = score(r["raw"], r["gold"], hit_cap=r["hit_cap"],
-                      thinking=r["cond"].startswith("cot"))
-        by.setdefault(r["cond"], {})[r["id"]] = (int(o == "correct"), o, r)
-    return by
+        try:
+            thinking = scoring.thinking_of(r["cond"])
+        except ValueError as e:
+            raise SystemExit(
+                f"{path}: {e}. Files under the archived letter naming carry "
+                f"conditions this grid cannot interpret; score them with the "
+                f"mapping they were generated under, not this tool.") from None
+        try:
+            d = score_detail(r["raw"], r["gold"], hit_cap=r["hit_cap"],
+                             thinking=thinking)
+        except Exception as e:                       # noqa: BLE001 - reported
+            d = dict(outcome="error", extracted="", normalized=False)
+            errors.append((r.get("id"), r["cond"],
+                           f"{type(e).__name__}: {e}"))
+        by.setdefault(r["cond"], {})[r["id"]] = (
+            int(d["outcome"] == "correct"), d["outcome"], r, d)
+    return by, errors
 
 
 def dataset_of(by, fallback):
@@ -101,7 +140,7 @@ def dataset_of(by, fallback):
     field, so absence falls back to the flag instead of guessing -- and a file
     holding two datasets is refused rather than averaged.
     """
-    seen = {r.get("dataset") for v in by.values() for _, _, r in v.values()}
+    seen = {r.get("dataset") for v in by.values() for _, _, r, *_ in v.values()}
     seen.discard(None)
     if len(seen) > 1:
         raise SystemExit(f"this file mixes datasets {sorted(seen)}; the cells "
@@ -134,7 +173,7 @@ def devices_of(by):
     """
     per = {}
     for cond, v in by.items():
-        seen = {r.get("device") for _, _, r in v.values()}
+        seen = {r.get("device") for _, _, r, *_ in v.values()}
         seen.discard(None)
         per[cond] = seen
     devices = set().union(*per.values()) if per else set()
@@ -148,10 +187,13 @@ def devices_of(by):
             lines.append(f"   {cond:16} {', '.join(sorted(per[cond]))}"
                          + ("   <- MIXED WITHIN THE CELL"
                             if len(per[cond]) > 1 else ""))
+    # Crossing is about the INTERACTION's two arms specifically: those are the
+    # cells the headline subtraction spans. LEVELS would drag nothink in and
+    # make `all(...)` false whenever the middle rung was (correctly) not run.
     by_arm = {lvl: set().union(*[per[c] for c in per
                                  if c.startswith(lvl + "_")] or [set()])
-              for lvl in LEVELS}
-    crosses = all(by_arm.get(l) for l in LEVELS) and \
+              for lvl in INTERACTION_ARMS}
+    crosses = all(by_arm.get(l) for l in INTERACTION_ARMS) and \
         by_arm["direct"] != by_arm["cot"]
     if crosses:
         lines.append("   The two ARMS differ, so the interaction below is a "
@@ -251,7 +293,7 @@ def main(argv=None):
         # analysis silently reads a different run than the one just produced --
         # which is the failure run_path was centralised to prevent, one level up.
         path = scoring.resolve(scoring.run_path(a.dataset, n, a.band))
-    by = load(path)
+    by, errors = load(path)
     dataset, stamped = dataset_of(by, a.dataset)
     rows, rows_src = rows_for(path, dataset)
     print(f"{path}\ncells present: {sorted(by)}")
@@ -262,24 +304,62 @@ def main(argv=None):
     dev_lines, dev_crosses = devices_of(by)
     if dev_lines:
         print("\n".join(dev_lines) + "\n")
+    if errors:
+        print(f"WARNING: {len(errors)} record(s) raised during scoring, "
+              f"counted as outcome='error'\n(not-correct in every number "
+              f"below):")
+        for i, c, m in errors[:5]:
+            print(f"   id={i} cond={c} {m}")
+        print()
+    if scoring.SLOW_PARSES:
+        # A parse that times out returns empty and the cache makes that
+        # permanent for the process -- and timing is machine-dependent. The
+        # warning lives here because THIS is the tool the headline numbers
+        # come from; score_file printing it was not enough.
+        print(f"WARNING: {len(scoring.SLOW_PARSES)} parse(s) ran within 10% "
+              f"of the {scoring.PARSE_KW['parsing_timeout']}s timeout. These "
+              f"records may score differently on another machine.\n")
 
-    print(f"{'cell':17}{'n':>5}{'acc':>7}   composition")
+    print(f"{'cell':17}{'n':>5}{'acc':>7}{'norm':>6}   composition")
     for level in LEVELS:
         for s in STATES:
             c = f"{level}_{s}"
             if c not in by:
                 continue
             v = by[c]
-            comp = Counter(o for _, o, _ in v.values())
+            comp = Counter(o for _, o, _, _ in v.values())
             acc = np.mean([x[0] for x in v.values()])
-            print(f"{c:17}{len(v):>5}{acc:>7.1%}   "
+            n_norm = sum(x[3]["normalized"] for x in v.values())
+            print(f"{c:17}{len(v):>5}{acc:>7.1%}{n_norm:>6}   "
                   + "  ".join(f"{k}={n}" for k, n in comp.most_common()))
+
+    # The rescue rate, compared across cells -- the comparison scoring.py's
+    # design principle demands and nothing previously computed. No threshold:
+    # what counts as "similar" is a judgment call, so the spread is surfaced
+    # and the judging left to the reader.
+    n_norm_total = sum(x[3]["normalized"]
+                       for v in by.values() for x in v.values())
+    if n_norm_total:
+        rates = {c: sum(x[3]["normalized"] for x in v.values()) / len(v)
+                 for c, v in by.items()}
+        hi = max(rates, key=rates.get)
+        lo = min(rates, key=rates.get)
+        print(f"\nmarkdown rescue (the norm column) fired on {n_norm_total} "
+              f"record(s). The rescue is safe\nonly if its rate is similar "
+              f"across cells -- an asymmetric rate is a differential\nbias "
+              f"(see scoring.unwrap_markdown). Spread: {rates[hi]:.1%} ({hi}) "
+              f"vs {rates[lo]:.1%} ({lo}).")
 
     arms = {}
     for level in LEVELS:
         ids, m, cells = arm(by, level)
         if m is None:
-            print(f"\n{level}: only {cells} present, nothing paired to compare")
+            # One cell present is worth saying (a staged run mid-way); zero
+            # cells is not a finding -- with nothink on the grid, every real
+            # run would otherwise print a line about an arm it never planned.
+            if cells:
+                print(f"\n{level}: only {cells} present, nothing paired to "
+                      f"compare")
             continue
         arms[level] = (ids, m)
         print(f"\n{level.upper()} ARM   {len(ids)} paired problems")
