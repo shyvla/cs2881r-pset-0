@@ -114,15 +114,19 @@ N_DEFAULT = {
     # chosen on MATH-500 scenario accuracies, and the reasoning above is what
     # a later reader should disagree with.
     #
+    # HOW THIS SAMPLE IS DRAWN is RUN_SAMPLE's rule, committed alongside:
+    # stratified, 30 problems from each of the five levels, so this n is
+    # per_level * len(levels) and the two constants must move together. The
+    # power scenarios above were computed before stratification (they assume
+    # the split's own difficulty mix); the observed-accuracy power run the
+    # report owes will supersede them either way.
+    #
     # ONE CONSEQUENCE, priced in: calib_ids draws DISJOINT from the run
-    # sample, so moving n re-draws the calibration sample -- measured, only 4
-    # of the 20 cap problems survive from the n=100 draw, and 91 of the 134
-    # level-5 problems remain outside the n=150 sample (4.5x the draw).
-    # Nothing measured is lost: the only calibration taken at n=100 came back
-    # censored at the 8192 ceiling and has to be deleted and re-measured
-    # anyway (see MEASURE_CAP). But this amendment must be committed BEFORE
-    # that re-measurement runs, or the caps would be sized on problems the
-    # run sample now contains.
+    # sample, so changing n or the sampling rule re-draws the calibration
+    # sample. The 16384 calibration on disk predates both changes -- see the
+    # CAPS entry below for why its censoring finding stands and its
+    # disjointness claim does not; the caps were committed as a budget
+    # decision, so no re-measurement hangs on it.
     #
     # WHAT TO DO WITH IT LATER: once the intact cells exist, run power.py at
     # the observed accuracies with analysis.observed_rho, and REPORT the power
@@ -186,6 +190,97 @@ def holdout_ids(n: int, dataset_size: int, seed: int = SEED) -> list[int]:
     return [i for i in problem_ids(n, dataset_size, seed) if i not in explored]
 
 
+# ------------------------------------------------- HOW the run sample is drawn
+#
+# problem_ids draws uniformly, which inherits the split's own difficulty mix.
+# For MATH-500 the committed design is BALANCED instead: 30 problems from each
+# of the five difficulty levels. The split is 43/90/105/128/134 across levels
+# 1-5, so a uniform n=150 would carry ~9% level-1 and ~27% level-5; balancing
+# gives every level equal precision in the per-level breakdown the report
+# makes. THE ESTIMAND CHANGES WITH IT: cell accuracies become level-balanced
+# averages, not split-weighted ones, and are not comparable to published
+# split-weighted MATH-500 numbers. The report must say so.
+#
+# Selection on METADATA, never on outcome data -- same status as CALIB_SAMPLE,
+# and committed here for the same reason: which problems are read changes the
+# number, so it is a pre-registered choice, made while no MATH-500 run data
+# exists.
+#
+# `per_level` is the committed intent at N_DEFAULT and is what run_ids'
+# construction delivers there: N_DEFAULT[d] must equal per_level * len(levels).
+RUN_SAMPLE = {
+    # Uniform, via problem_ids. The committed n=150 run was drawn this way and
+    # a rule here cannot change retroactively what is already on disk.
+    "gsm8k": None,
+
+    "math500": {"per_level": 30, "levels": (1, 2, 3, 4, 5)},
+
+    # The whole dataset; there is nothing to stratify or leave out.
+    "aime24": None,
+}
+
+
+def run_ids(dataset: str, n: int, dataset_size: int, difficulty=None,
+            seed: int = SEED) -> list[int]:
+    """The run's problem ids: problem_ids, unless RUN_SAMPLE registers a
+    stratified rule for `dataset`.
+
+    A stratified draw is a prefix of an INTERLEAVED sequence: each level's
+    pool is shuffled under a level-keyed seed, then the sequence takes one
+    problem per level per round (L1[0], L2[0], .., L5[0], L1[1], ..). Two
+    properties fall out, both load-bearing:
+
+      * NESTING, the same property problem_ids buys with its shuffle prefix:
+        run_ids(n) is a subset of run_ids(n') for n <= n', so a pilot, a
+        timing run and the real run stay comparable, and pin_guard's
+        n-extension acceptance keeps working.
+      * BALANCE AT EVERY PREFIX: any n divisible by the level count has
+        exactly n/levels problems per level, and any other n is within one.
+        n=150 over five levels is exactly 30 per level -- the committed
+        design -- and --n 1 still means something (one problem, drawn from
+        the lowest level).
+
+    `difficulty` is the per-problem difficulty sequence, built by the caller
+    from scoring.difficulty_of -- reading a record is scoring's job, choosing
+    which records is this file's, the same division of labour as calib_ids.
+    Only required when the dataset actually stratifies.
+    """
+    spec = RUN_SAMPLE.get(dataset)
+    if spec is None:
+        return problem_ids(n, dataset_size, seed)
+    if difficulty is None:
+        raise ValueError(
+            f"RUN_SAMPLE[{dataset!r}] stratifies by difficulty, so run_ids "
+            f"needs the per-problem difficulty sequence "
+            f"(scoring.difficulty_of over the split).")
+    if len(difficulty) != dataset_size:
+        raise ValueError(
+            f"difficulty has {len(difficulty)} entries for a dataset of "
+            f"{dataset_size} -- these must describe the same split.")
+    pools = {}
+    for lvl in spec["levels"]:
+        pool = [i for i, d in enumerate(difficulty) if d == lvl]
+        # Level-keyed, so each level's order is independent of the others:
+        # changing which levels are drawn cannot reshuffle the rest.
+        rng = random.Random(f"{seed}:stratum:{lvl}")
+        rng.shuffle(pool)
+        pools[lvl] = pool
+    total = sum(len(p) for p in pools.values())
+    if n > total:
+        raise ValueError(
+            f"asked for {n} problems but {dataset} has {total} at levels "
+            f"{spec['levels']} (of {dataset_size} rows)")
+    out, round_ = [], 0
+    while len(out) < n:
+        for lvl in spec["levels"]:
+            if round_ < len(pools[lvl]):
+                out.append(pools[lvl][round_])
+                if len(out) == n:
+                    break
+        round_ += 1
+    return sorted(out)
+
+
 # ---------------------------------------------------------------- generation
 
 # The levels the MVP run actually generates. `nothink` is in LEVELS and in CAPS
@@ -232,12 +327,44 @@ CAPS = {
         # removes the ambiguity.
         "direct": 128,
     },
-    # UNDECIDED, and deliberately NOT copied from GSM8K. Both need a measured
-    # cap before any ablated data exists: run the intact cells first, read the
-    # hit_cap rate, set these above it with headroom. A guessed cap is cheap to
-    # write and expensive to discover, because a binding cap looks exactly like
-    # the ablation making the model fail to answer.
-    "math500": {"cot": None, "nothink": None, "direct": None},
+    # DECIDED, from the two-step calibration MEASURE_CAP prescribes, with the
+    # censoring disclosed rather than dressed up:
+    #
+    # cot = 16384, A BUDGET CAP AT THE MEASUREMENT CEILING, not a cleared
+    # tail. The 8192 calibration censored at 35%; the 16384 re-measurement
+    # (runs/calib_math500_n25.jsonl) still censored at exactly 15% -- 3 of 20,
+    # ON the CEILING_RETRY_MAX_HIT boundary, where another doubling is
+    # permitted but no longer prescribed. We stop, per the rule's own
+    # rationale: the level-5 tail does not reliably terminate (median 6070,
+    # p90 at the ceiling), each doubling re-prices the whole cot arm, and an
+    # unbounded tail cannot be chased to a cap. CONSEQUENCES, to be reported
+    # as stated limitations: ~15% of hard-end intact cot generations score
+    # `incomplete` at this cap (the stratified run sample is level-5 in a
+    # fifth of its problems, so the run-wide rate should sit well under
+    # that), and the loop gate's unusable-delta baseline absorbs it because
+    # the intact cell pays the same cap.
+    #
+    # DISCLOSED: the 16384 measurement predates both the n=150 amendment and
+    # RUN_SAMPLE's stratified rule, so its disjoint-from-run claim was
+    # verified against the old uniform n=100 sample -- 6 of its 20 cap
+    # problems sit inside the run sample as now drawn. The censoring FINDING
+    # stands (all 20 are level-5 regardless, and the 8192 pass showed the
+    # runaway is not confined to the hard tail), but the cap is committed as
+    # a budget decision, not as that file's suggest_cap output.
+    #
+    # direct = 128. Measured max 10 tokens against the 512 ceiling in both
+    # calibrations; suggest_cap says 128 from either, which is also GSM8K's
+    # committed value for the same reason its entry records: a tight direct
+    # cap bound on 100% of INTERVENED generations, and the margin exists for
+    # the ablated states a calibration never sees.
+    "math500": {"cot": 16384, "nothink": None, "direct": 128},
+
+    # UNDECIDED, and deliberately NOT copied from GSM8K or MATH-500. Needs a
+    # measured cap before any ablated data exists: run the intact cells
+    # first, read the hit_cap rate, set these above it with headroom. A
+    # guessed cap is cheap to write and expensive to discover, because a
+    # binding cap looks exactly like the ablation making the model fail to
+    # answer.
     "aime24": {"cot": None, "nothink": None, "direct": None},
 }
 
@@ -347,13 +474,14 @@ CALIB_SAMPLE = {
     # Caps already committed and the data already generated. Nothing to draw.
     "gsm8k": None,
 
-    # 134 of the 500 problems are level 5, and 43 of those fall inside the
-    # n=150 run sample -- so 20 can be drawn from the 91 the run will never
-    # touch, with the pool still 4.5x the draw. Worst-case coverage AND
-    # zero overlap with the analysed sample, which is the one combination a
-    # prefix of the run sample cannot give. (The numbers were 31 inside/103
-    # outside at the original n=100; see N_DEFAULT for why the amendment
-    # re-drew this sample and why no measurement was lost.)
+    # 134 of the 500 problems are level 5, and RUN_SAMPLE's stratified rule
+    # puts exactly 30 of them inside the run -- so 20 can be drawn from the
+    # 104 the run will never touch, with the pool still 5.2x the draw.
+    # Worst-case coverage AND zero overlap with the analysed sample, which is
+    # the one combination a prefix of the run sample cannot give. (Earlier
+    # numbers under the uniform draw: 31 inside/103 outside at n=100, 43/91
+    # at n=150. The committed caps no longer hang on a re-measurement -- see
+    # CAPS -- so this rule now matters only if a calibration is re-run.)
     #
     # 20 rather than 15 because the number this sample exists to estimate is a
     # TAIL, and the tail is what a small sample estimates worst: suggest_cap
@@ -427,7 +555,12 @@ def calib_ids(dataset: str, difficulty, run_n: int | None = None,
                 f"CALIB_SAMPLE[{dataset!r}] asks to exclude the run sample but "
                 f"no run n is known -- set N_DEFAULT[{dataset!r}] first, or the "
                 f"'disjoint' claim is unverifiable.")
-        exclude = set(problem_ids(run_n, len(difficulty), seed))
+        # The RUN's own rule, not problem_ids unconditionally: math500's run
+        # sample is stratified (RUN_SAMPLE), and excluding a sample the run
+        # does not use would leave the disjointness claim false exactly where
+        # it is made.
+        exclude = set(run_ids(dataset, run_n, len(difficulty), difficulty,
+                              seed))
 
     def draw(rng_range, k, label):
         if not k or rng_range is None:

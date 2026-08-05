@@ -855,7 +855,9 @@ def check_data(dataset, n, levels=None):
             n = ds.num_rows
             print(f"note: N_DEFAULT[{dataset!r}] is unset and --n was not "
                   f"given, so this validates the WHOLE split ({n} rows).")
-    ids_ = config.problem_ids(n, len(ds))
+    diff = ([scoring.difficulty_of(dataset, ds[i]) for i in range(ds.num_rows)]
+            if config.RUN_SAMPLE.get(dataset) else None)
+    ids_ = config.run_ids(dataset, n, len(ds), difficulty=diff)
     field = scoring.question_field(dataset, ds[ids_[0]])
     bad = scoring.validate_gold(dataset, [ds[i] for i in ids_])
     fp = scoring.dataset_fingerprint(ds, ids_)
@@ -864,6 +866,12 @@ def check_data(dataset, n, levels=None):
     print(f"  resolved mirror {path}" + (f"/{name}" if name else ""))
     print(f"  problem field   {field!r}   of {sorted(ds[ids_[0]])}")
     print(f"  sample          n={n}  ids {ids_[:5]}{'...' if n > 5 else ''}")
+    if diff is not None:
+        by_level = {}
+        for i in ids_:
+            by_level[diff[i]] = by_level.get(diff[i], 0) + 1
+        print(f"  stratified      {dict(sorted(by_level.items()))} per level "
+              f"(config.RUN_SAMPLE)")
     print(f"  content sha256  {fp['content_sha256']}")
     gold = scoring.GOLD_FIELD[dataset](ds[ids_[0]])
     print(f"  first gold      {gold!r}")
@@ -1135,7 +1143,17 @@ def main(argv=None):
             if sel["contrast"]:
                 print(f"contrast   {sel['contrast']}")
         else:
-            ids_ = config.problem_ids(n, len(ds))
+            # config.run_ids, not problem_ids: math500's committed sample is
+            # STRATIFIED (config.RUN_SAMPLE, 30 per difficulty level), so the
+            # difficulty column is part of drawing the sample there, read the
+            # same way the calibration branch reads it.
+            diff = ([scoring.difficulty_of(a.dataset, ds[i])
+                     for i in range(ds.num_rows)]
+                    if config.RUN_SAMPLE.get(a.dataset) else None)
+            try:
+                ids_ = config.run_ids(a.dataset, n, len(ds), difficulty=diff)
+            except ValueError as e:
+                raise SystemExit(str(e)) from None
         # Resolved ONCE, and before the loop: a wrong field name is then a
         # pre-flight error naming the keys that do exist, not a KeyError on the
         # first problem of the first cell with the model already resident.

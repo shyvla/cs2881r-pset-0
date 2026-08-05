@@ -579,6 +579,47 @@ def test_cap_report_censored_above_threshold_prints_the_stopping_rule():
 _DIFF = [1 + (i % 5) for i in range(100)]
 
 
+def test_run_ids_stratifies_math500_balanced_and_nested():
+    """RUN_SAMPLE commits MATH-500 to a level-balanced sample: 30 per level at
+    the pre-registered n=150. The draw is a prefix of an interleaved sequence,
+    so it balances at EVERY prefix and nests like problem_ids -- a pilot and
+    a timing run stay subsets of the real run."""
+    from collections import Counter
+    ids = config.run_ids("math500", 25, len(_DIFF), difficulty=_DIFF)
+    assert Counter(_DIFF[i] for i in ids) == {1: 5, 2: 5, 3: 5, 4: 5, 5: 5}
+    # deterministic, and a smaller draw is a subset of a larger one
+    assert config.run_ids("math500", 25, len(_DIFF), difficulty=_DIFF) == ids
+    small = config.run_ids("math500", 10, len(_DIFF), difficulty=_DIFF)
+    assert set(small) < set(ids)
+    # non-divisible n stays within one per level; --n 1 stays expressible
+    lop = Counter(_DIFF[i] for i in
+                  config.run_ids("math500", 7, len(_DIFF), difficulty=_DIFF))
+    assert max(lop.values()) - min(lop.values()) <= 1
+    assert len(config.run_ids("math500", 1, len(_DIFF), difficulty=_DIFF)) == 1
+
+
+def test_run_ids_falls_back_to_problem_ids_without_a_rule():
+    """gsm8k's committed data was drawn uniformly and aime24 is the whole
+    dataset: for both, run_ids must be problem_ids exactly, or the sample
+    silently changes under a run that already exists."""
+    assert config.run_ids("gsm8k", 20, 1319) == config.problem_ids(20, 1319)
+    assert config.run_ids("aime24", 30, 30) == config.problem_ids(30, 30)
+
+
+def test_run_ids_refuses_what_it_cannot_draw():
+    for args, frag in (
+            (("math500", 20, 100), "difficulty"),          # rule, no column
+            (("math500", 20, 100, [5] * 99), "same split"),  # wrong length
+            (("math500", 101, 100, _DIFF), "has 100"),       # over the pools
+    ):
+        try:
+            config.run_ids(*args)
+        except ValueError as e:
+            assert frag in str(e), (args, e)
+        else:
+            raise AssertionError(f"run_ids{args} should have raised")
+
+
 def test_calib_sample_draws_only_from_the_hard_end():
     """The cap's loss is asymmetric -- too low is a differential bias, too high
     costs seconds -- so the quantity to observe is the upper tail, not the
@@ -607,7 +648,10 @@ def test_calib_sample_can_avoid_the_run_sample_entirely():
         config.CALIB_SAMPLE["math500"] = {
             "difficulty": (5, 5), "n": 5, "contrast": None, "contrast_n": 0,
             "disjoint_from_run": True}
-        run_sample = set(config.problem_ids(40, len(_DIFF)))
+        # The RUN's own rule (stratified for math500), not problem_ids: the
+        # disjointness claim is against the sample the run actually reads.
+        run_sample = set(config.run_ids("math500", 40, len(_DIFF),
+                                        difficulty=_DIFF))
         sel = config.calib_ids("math500", _DIFF, run_n=40)
         assert not set(sel["cap"]) & run_sample, (sel["cap"], run_sample)
         # ...and it refuses to claim disjointness it cannot verify.

@@ -886,13 +886,31 @@ def test_cap_for_requires_a_dataset():
 
 def test_unset_caps_raise_rather_than_reaching_generate():
     """max_new_tokens=None does not fail -- it generates to the context limit.
-    So an undecided cap must raise here, not return None."""
-    for d in ("math500", "aime24"):
+    So an undecided cap must raise here, not return None. Tested by UNSETTING
+    a committed cap rather than pointing at whichever dataset happens to be
+    open (math500's caps were committed and quietly retired the old version
+    of this guard), so settling a pre-registration cannot retire it again."""
+    saved = config.CAPS["gsm8k"]["direct"]
+    try:
+        config.CAPS["gsm8k"]["direct"] = None
         try:
-            config.cap_for("direct_intact", d)
+            config.cap_for("direct_intact", "gsm8k")
         except ValueError:
-            continue
-        raise AssertionError(f"unset cap for {d} did not raise")
+            pass
+        else:
+            raise AssertionError("unset cap did not raise")
+    finally:
+        config.CAPS["gsm8k"]["direct"] = saved
+
+
+def test_math500_pre_registration_is_closed_at_the_committed_values():
+    """The caps the report will cite: cot at the 16384 measurement ceiling (a
+    budget decision under the stopping rule -- the CAPS comment says why) and
+    direct at the measured 128. A drift here is a different experiment."""
+    assert config.dataset_ready("math500") == []
+    for state in ("intact", "ablated", "random"):
+        assert config.cap_for(f"cot_{state}", "math500") == 16384
+        assert config.cap_for(f"direct_{state}", "math500") == 128
 
 
 def test_gsm8k_direct_prompt_is_byte_identical_to_what_ran():
@@ -1034,14 +1052,21 @@ def test_suggest_cap_clears_the_distribution_it_was_given():
     raise AssertionError("an empty sample cannot size a cap")
 
 
-def test_measure_cap_exceeds_every_committed_cap():
-    """MEASURE_CAP is a ceiling for calibration, so it must be looser than any
-    cap it could ever be used to size -- otherwise the measurement is censored
-    below the answer."""
+def test_measure_cap_is_never_below_a_committed_cap():
+    """MEASURE_CAP is a ceiling for calibration, so it must be at least as
+    loose as any cap it could be used to size -- otherwise the measurement is
+    censored below the answer.
+
+    EQUALITY is allowed, because the stopping rule creates exactly one
+    legitimate case of it: a tail that will not terminate cannot be chased to
+    a cap (CEILING_RETRY_MAX_HIT), and the cap is then committed AT the
+    measurement ceiling as a budget decision with the censoring disclosed --
+    math500's cot cap is that case. Strictly-below stays the invariant for
+    caps that claim to be measured."""
     for dataset, caps in config.CAPS.items():
         for level, cap in caps.items():
             if cap is not None:
-                assert config.MEASURE_CAP[level] > cap, (dataset, level)
+                assert config.MEASURE_CAP[level] >= cap, (dataset, level)
 
 
 def test_bands_translate_to_the_documented_layers():
