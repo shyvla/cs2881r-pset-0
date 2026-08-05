@@ -36,6 +36,24 @@ it; https://download.pytorch.org/whl/ lists the builds that exist for 2.13.0). `
 not the platform wheel — deliberately, since the repo runs on both, and it is
 why the backend is recorded per record rather than assumed.
 
+**Do not skip that line and let PyPI choose.** The default `torch==2.13.0`
+wheel is a `+cu130` build, which needs a 13.x driver; against the 12.x drivers
+common on rented instances, torch disables CUDA *silently* and
+`loaders.pick_device` then falls back to CPU. That is a ~40x slowdown that
+looks like a working run — measured here at ~1 tok/s against ~1.5 tok/s on an
+M-series laptop. Of the 12.x builds, only **cu126** exists for 2.13.0
+(`cu124` and `cu128` have no wheels for this version), and a 12.8 driver runs a
+12.6 runtime fine under CUDA minor-version compatibility.
+
+Verify before generating anything, and prefer an explicit `--device cuda` on
+every command afterwards — `loaders._parse_device` then refuses in one second
+with "torch reports no CUDA device on this machine" instead of quietly
+succeeding on the wrong backend:
+
+```bash
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+```
+
 ## 3. Cache location
 
 The model cache belongs on the instance's large volume, not the root disk:

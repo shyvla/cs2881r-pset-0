@@ -252,7 +252,29 @@ CAPS = {
 # cap on them would size it to degenerate behaviour -- and it would also mean
 # seeing ablated outcomes before the pre-registration is closed, which is the
 # thing this file exists to prevent.
-MEASURE_CAP = {"cot": 8192, "nothink": 2048, "direct": 512}
+# cot RAISED 8192 -> 16384 after the first math500 calibration came back
+# censored: 35% of the 20 level-5 problems ran to 8192, with a median of 6684,
+# so a real part of the mass sits just above the old ceiling. The direct
+# ceiling is untouched -- it measured a max of 10 tokens against 512.
+MEASURE_CAP = {"cot": 16384, "nothink": 2048, "direct": 512}
+
+# THE STOPPING RULE, committed BEFORE the 16384 calibration is read, because a
+# rule written afterwards is a judgement made on the outcome.
+#
+#     If the re-measurement still hits the ceiling on more than 15% of the cap
+#     sample, DO NOT RAISE AGAIN. The finding is then that Qwen3-4B does not
+#     reliably terminate on this dataset, which is a property of the model and
+#     the benchmark, not a measurement that a bigger number will fix. Set the
+#     cot cap from what the run can afford, and report the per-cell
+#     `incomplete` rate as a stated limitation of the design.
+#
+# WHY A RULE AND NOT A JUDGEMENT. Each doubling costs a full re-calibration and
+# then roughly +50% on a ~21h run, and the temptation at 20% censoring will be
+# to raise "just once more". The first calibration also showed the runaway
+# behaviour is NOT confined to the hard tail -- one of the five level-3
+# contrast problems hit 8192 too -- so the tail may not be bounded at all, and
+# an unbounded tail cannot be chased to a cap.
+CEILING_RETRY_MAX_HIT = 0.15
 
 # Headroom over the measured distribution when suggesting a cap. 1.5x the p99,
 # rounded up to a multiple of 128. Stated here rather than buried in run.py

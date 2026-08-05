@@ -563,7 +563,7 @@ def cap_report(path, dataset):
         sug = config.suggest_cap(toks)
         suggestions[level] = sug
         if hit:
-            censored.append(level)
+            censored.append((level, hit))
         print(f"{level:9}{len(toks):>4}{q(0.5):>7}{q(0.9):>7}{q(0.99):>7}"
               f"{toks[-1]:>7}{ceiling:>9}{hit:>6.0%}"
               f"{unusable_rate(recs):>10.0%}   {sug}")
@@ -643,10 +643,33 @@ def cap_report(path, dataset):
     if broken:
         return 1
     if censored:
-        print(f"\nDO NOT COMMIT THESE. {sorted(censored)} hit the ceiling, so "
-              f"the length\ndistribution is censored and every number above is "
-              f"a lower bound. Raise\nconfig.MEASURE_CAP for those levels and "
-              f"re-run this calibration first.")
+        # WHICH instruction gets printed is decided by the pre-registered
+        # stopping rule, not by this function: config.CEILING_RETRY_MAX_HIT
+        # was committed before the re-measurement precisely so that the
+        # response to censoring is not a judgement made on the outcome. This
+        # is the message the operator follows, so printing "raise it once
+        # more" above the threshold would re-open the decision the rule
+        # closed.
+        rule = config.CEILING_RETRY_MAX_HIT
+        raise_first = sorted(l for l, h in censored if h <= rule)
+        stop = sorted((l, h) for l, h in censored if h > rule)
+        if raise_first:
+            print(f"\nDO NOT COMMIT THESE. {raise_first} hit the ceiling, so "
+                  f"the length\ndistribution is censored and every number "
+                  f"above is a lower bound. Raise\nconfig.MEASURE_CAP for "
+                  f"those levels and re-run this calibration first.")
+        for level, h in stop:
+            print(f"\nSTOPPING RULE (config.CEILING_RETRY_MAX_HIT): {level} "
+                  f"hit the ceiling on {h:.0%}\nof the cap sample, over the "
+                  f"{rule:.0%} limit. DO NOT RAISE MEASURE_CAP AGAIN.\n"
+                  f"The finding is that the model does not reliably terminate "
+                  f"on this dataset --\na property of the model and the "
+                  f"benchmark, not a measurement a bigger\nceiling will fix. "
+                  f"Set the {level} cap from what the run can afford, commit "
+                  f"it as\na budget decision rather than a measurement, and "
+                  f"report the per-cell\n`incomplete` rate as a stated "
+                  f"limitation of the design. The suggestion\nabove is a "
+                  f"lower bound and is NOT the number to commit.")
         return 1
     print("\nTo commit, edit config.CAPS in a reviewable diff:")
     print(f"    CAPS[{dataset!r}] = {{"

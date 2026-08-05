@@ -429,6 +429,38 @@ def test_cap_report_flags_a_censored_distribution():
         assert run.cap_report(p, "math500") == 0
 
 
+def test_cap_report_censored_above_threshold_prints_the_stopping_rule():
+    """Censoring above config.CEILING_RETRY_MAX_HIT must print the
+    pre-registered stopping rule, NOT "raise MEASURE_CAP and re-run". The rule
+    was committed before the re-measurement precisely so the response to heavy
+    censoring is not a judgement made on the outcome -- and this printout is
+    the instruction the operator actually follows, so a "raise it once more"
+    here would re-open the decision the rule closed."""
+    import contextlib
+    import io
+
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "calib.jsonl")
+        with open(p, "w") as f:
+            for i in range(20):
+                hit = i < 4                     # 20% > the 15% rule
+                f.write(json.dumps({
+                    "id": i, "cond": "cot_intact", "dataset": "math500",
+                    "raw": "<think>ok</think>\\boxed{7}", "gold": "7",
+                    "n_tok": 16384 if hit else 300, "cap": 16384,
+                    "hit_cap": hit, "calibration": True}) + "\n")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = run.cap_report(p, "math500")
+    out = buf.getvalue()
+    assert rc == 1, "a censored report must still fail"
+    assert "STOPPING RULE" in out, out
+    assert "DO NOT RAISE MEASURE_CAP AGAIN" in out, out
+    assert "re-run this calibration" not in out, (
+        "above the threshold the raise-and-re-run instruction must not "
+        "appear:\n" + out)
+
+
 # ============================== which problems the calibration measures on
 
 # Stand-in for a split's difficulty column, so none of this needs a download:
