@@ -1,0 +1,55 @@
+{
+ "model_revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+ "hardware": {
+  "device": "cuda",
+  "backend": "cuda",
+  "torch": "2.13.0+cu130",
+  "gpu": "NVIDIA GeForce RTX 5090"
+ },
+ "dataset": {
+  "rows": 500,
+  "fingerprint": "f3124375297911ba",
+  "download_size": 446564,
+  "dataset": "math500",
+  "path": "HuggingFaceH4/MATH-500",
+  "name": null,
+  "split": "test",
+  "question_field": "problem",
+  "ids": [
+   12,
+   52,
+   80,
+   88,
+   101,
+   132,
+   154,
+   184,
+   204,
+   234,
+   241,
+   244,
+   252,
+   278,
+   286,
+   309,
+   327,
+   342,
+   356,
+   373,
+   400,
+   450,
+   454,
+   466,
+   475
+  ],
+  "content_sha256": "81fc4a18bc3f3837"
+ },
+ "hardware_history": [
+  {
+   "device": "cuda",
+   "backend": "cuda",
+   "torch": "2.13.0+cu130",
+   "gpu": "NVIDIA GeForce RTX 5090"
+  }
+ ]
+}

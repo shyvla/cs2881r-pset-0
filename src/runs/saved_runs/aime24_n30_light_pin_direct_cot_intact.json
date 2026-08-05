@@ -56,19 +56,5 @@
    "torch": "2.13.0+cu126",
    "gpu": "NVIDIA H100 80GB HBM3"
   }
- ],
- "merged_from": [
-  {
-   "file": "aime24_n30_light.jsonl",
-   "device": "cuda",
-   "gpu": "NVIDIA H100 80GB HBM3",
-   "records": 120
-  },
-  {
-   "file": "aime24_n30_light.jsonl",
-   "device": "cuda",
-   "gpu": "NVIDIA H100 80GB HBM3",
-   "records": 30
-  }
  ]
 }
