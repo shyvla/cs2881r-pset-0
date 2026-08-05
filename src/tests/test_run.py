@@ -110,7 +110,7 @@ def test_resolve_n_prefers_the_flag_and_falls_back_to_the_committed_n():
     assert run.resolve_n("gsm8k", 20) == 20
     assert run.resolve_n("gsm8k", None) == config.N_DEFAULT["gsm8k"]
     assert run.resolve_n("aime24", None) == 30
-    assert run.resolve_n("math500", None) == 100
+    assert run.resolve_n("math500", None) == 150
 
 
 def test_resolve_n_exits_rather_than_borrowing_gsm8ks_n():

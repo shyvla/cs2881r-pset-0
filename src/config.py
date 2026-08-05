@@ -98,22 +98,37 @@ N_DEFAULT = {
     # accuracies with rho=0.5.
     "gsm8k": 150,
 
-    # DECIDED: 100. A fifth of the split, and deliberately not GSM8K's 150 --
-    # copying that number across would be inheriting a sample size derived from
-    # GSM8K accuracies and calling it a justification.
+    # DECIDED: 150, AMENDED from 100 -- before any MATH-500 run data exists,
+    # which is what makes it an amendment rather than a rescue.
     #
-    # STATED HONESTLY: this is a committed budget decision, NOT yet the output
-    # of a power run on MATH-500's own numbers -- those need the intact
-    # accuracies, which do not exist until the dataset has been run. Committing
-    # it before the data exists is what makes it a pre-registration rather than
-    # a number chosen once the CIs were visible, which is the property that
-    # matters here.
+    # 100 was a committed budget decision, not a power output. The amendment
+    # is a power decision made the same pre-data way: power.py at a
+    # GSM8K-sized interaction (0.40/0.10/0.90/0.80, rho=0.5) gives n=100 a
+    # power of 0.82 with a 27-point CI -- at the edge of its own >=0.80 rule
+    # and past the ~25-point width its output calls uninterpretable -- against
+    # 0.97 and 22 points at n=150. Under a +10 interaction both are hopeless
+    # (0.30 vs 0.40 power; 0.80 needs n~400, which is 80% of the split and
+    # starves CALIB_SAMPLE's disjoint pool). So the extra 50 problems buy
+    # margin exactly and only in the world where the effect is detectable at
+    # all. Deliberately still not GSM8K's 150-by-coincidence: the number was
+    # chosen on MATH-500 scenario accuracies, and the reasoning above is what
+    # a later reader should disagree with.
+    #
+    # ONE CONSEQUENCE, priced in: calib_ids draws DISJOINT from the run
+    # sample, so moving n re-draws the calibration sample -- measured, only 4
+    # of the 20 cap problems survive from the n=100 draw, and 91 of the 134
+    # level-5 problems remain outside the n=150 sample (4.5x the draw).
+    # Nothing measured is lost: the only calibration taken at n=100 came back
+    # censored at the 8192 ceiling and has to be deleted and re-measured
+    # anyway (see MEASURE_CAP). But this amendment must be committed BEFORE
+    # that re-measurement runs, or the caps would be sized on problems the
+    # run sample now contains.
     #
     # WHAT TO DO WITH IT LATER: once the intact cells exist, run power.py at
     # the observed accuracies with analysis.observed_rho, and REPORT the power
     # this n actually had. If it is low, that is a stated limitation of a
     # pre-registered design; it is not a licence to raise n and re-read the
-    # result. problem_ids is a shuffle prefix, so extending to 150 later is a
+    # result. problem_ids is a shuffle prefix, so a later extension is a
     # strict superset and nothing already generated is wasted -- but an
     # extension decided after seeing the interaction is a different experiment
     # and has to be labelled as one.
@@ -124,7 +139,7 @@ N_DEFAULT = {
     # identically, and records the old n in the pin's sample_history. Note
     # that the calibration sample's disjoint-from-run claim was verified at
     # the OLD n -- recompute the overlap and report it.
-    "math500": 100,
+    "math500": 150,
 
     # The WHOLE dataset, not a sample. 30 problems is what AIME 2024 has, so
     # there is nothing to choose and nothing to power-analyse -- report it as
@@ -332,11 +347,13 @@ CALIB_SAMPLE = {
     # Caps already committed and the data already generated. Nothing to draw.
     "gsm8k": None,
 
-    # 134 of the 500 problems are level 5, and only 31 of those fall inside the
-    # n=100 run sample -- so 20 can be drawn from the 103 the run will never
-    # touch, with the pool still five times the draw. Worst-case coverage AND
+    # 134 of the 500 problems are level 5, and 43 of those fall inside the
+    # n=150 run sample -- so 20 can be drawn from the 91 the run will never
+    # touch, with the pool still 4.5x the draw. Worst-case coverage AND
     # zero overlap with the analysed sample, which is the one combination a
-    # prefix of the run sample cannot give.
+    # prefix of the run sample cannot give. (The numbers were 31 inside/103
+    # outside at the original n=100; see N_DEFAULT for why the amendment
+    # re-drew this sample and why no measurement was lost.)
     #
     # 20 rather than 15 because the number this sample exists to estimate is a
     # TAIL, and the tail is what a small sample estimates worst: suggest_cap
