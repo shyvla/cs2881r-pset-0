@@ -396,6 +396,48 @@ DATASETS = {
 }
 
 
+# How to read a problem's DIFFICULTY, where the dataset carries one. Here
+# beside GOLD_FIELD rather than in config.py for the same reason: this is a fact
+# about how the record is laid out, not a choice. WHICH difficulties to
+# calibrate on is the choice, and that lives in config.CALIB_SAMPLE.
+#
+# Returns None when the dataset has no difficulty signal, and raises nothing --
+# a caller that needs one checks. Verified against the loaded splits:
+#   math500  `level`, integers 1-5, distribution 43/90/105/128/134
+#   aime24   no difficulty field, but `url` ends in .../Problem_13
+#   gsm8k    nothing
+DIFFICULTY = {
+    "gsm8k": lambda r: None,
+
+    # MATH's own label, carried through to MATH-500. The real thing, not a
+    # proxy.
+    "math500": lambda r: int(r["level"]),
+
+    # A PROXY, and it must be labelled one wherever it is reported. AIME
+    # problems are conventionally ordered easiest-to-hardest within each exam,
+    # so problem number stands in for difficulty -- but it is a convention
+    # about how the exam is written, not a measurement, and it says nothing
+    # about how the two exams (I and II) compare to each other. Both 2024 exams
+    # are pooled here, so "problem 13" means two different problems.
+    "aime24": lambda r: (
+        int(re.search(r"Problem_(\d+)", r["url"]).group(1))
+        if r.get("url") and re.search(r"Problem_(\d+)", r["url"]) else None),
+}
+
+
+def difficulty_of(dataset: str, record):
+    """This record's difficulty, or None when the dataset carries none.
+
+    Never raises on a missing field: mirrors differ, and a calibration that
+    cannot read difficulty must fail with a message about the SAMPLE it could
+    not draw, not with a KeyError from inside a lambda.
+    """
+    try:
+        return DIFFICULTY[dataset](record)
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return None
+
+
 def load_problems(dataset: str):
     """Load a dataset's split, trying its mirrors in order.
 
@@ -438,6 +480,25 @@ def question_field(dataset: str, record) -> str:
         f"something this repo has verified for every mirror.")
 
 
+# run_path and calib_path name a file RELATIVE TO src/, which is where every
+# entry point lives and where CI sets working-directory. Launched from anywhere
+# else, "runs/..." used to mean a fresh empty directory beside the caller: a
+# resumable run silently regenerated everything, and analyze.py could not find
+# what run.py had just written. Anchoring the relative name here keeps the
+# names themselves stable (they are pinned by test_scoring) while making them
+# mean the same file from any working directory.
+SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def resolve(path: str) -> str:
+    """A runs/ path as an absolute filename, anchored to src/.
+
+    An absolute path is returned unchanged, so an explicit `--out` still means
+    exactly what the caller typed.
+    """
+    return path if os.path.isabs(path) else os.path.join(SRC_DIR, path)
+
+
 def run_path(dataset: str, n: int, band: str) -> str:
     """The generations file for a run. ONE construction, because run.py
     writes it and analyze.py has to find it, and a filename built twice is
@@ -445,6 +506,22 @@ def run_path(dataset: str, n: int, band: str) -> str:
     a different run than the one just produced."""
     return f"runs/{dataset}_n{n}_{band}.jsonl".replace("(", "").replace(
         ")", "")
+
+
+def calib_path(dataset: str, n: int) -> str:
+    """Where `run.py --calibrate-caps` writes. A DIFFERENT NAMESPACE from
+    run_path, deliberately.
+
+    Calibration generations are intact-only, produced at config.MEASURE_CAP
+    rather than at a pre-registered cap, and exist to size that cap. They are
+    not run data and must never be analysed as if they were: pooled with a real
+    run they would contribute intact cells generated under a different
+    max_new_tokens, which is a different condition. The prefix makes that
+    visible in a directory listing, `analyze.py` refuses records carrying the
+    calibration stamp, and no band appears in the name because no intervention
+    was applied.
+    """
+    return f"runs/calib_{dataset}_n{n}.jsonl"
 
 
 def validate_gold(dataset: str, records) -> list[int]:

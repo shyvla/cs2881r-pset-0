@@ -57,4 +57,20 @@ jobs:
           python -m probes.directions --tiny
           python -m probes.exclusion --tiny
           python -m probes.damage_floor --tiny
+          # capture and intervention were the two probes carrying their own
+          # copies of load_real/load_tiny, so they were the two that could
+          # silently measure a different model than the run. They import
+          # loaders now, and are smoke-tested here for the same reason the
+          # others are.
+          python -m probes.capture --tiny
+          python -m probes.intervention --tiny
           python run.py --tiny --n 1 --smoke-cap 8 --out "$RUNNER_TEMP/ci_smoke.jsonl"
+          # A weightless model never emits EOS, so every generation runs to the
+          # cap and the length distribution is fully censored. Refusing to
+          # suggest a cap (exit 1) is therefore the CORRECT outcome here, and
+          # exit 0 would mean the censoring check had stopped working.
+          if python run.py --tiny --calibrate-caps --n 2 --smoke-cap 8 \
+               --out "$RUNNER_TEMP/ci_calib.jsonl"; then
+            echo "calibration suggested caps from a censored distribution"
+            exit 1
+          fi

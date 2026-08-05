@@ -1,6 +1,6 @@
 """Placement probe -- trivial intervention, and prove it lands where you think.
 
-    python -m probes.intervention          # real Qwen3-4B on mps
+    python -m probes.intervention          # real Qwen3-4B, best available device
     python -m probes.intervention --tiny   # weightless smoke test, no GPU
 
 "Output changed" is NOT the deliverable. Any perturbation anywhere changes
@@ -25,7 +25,7 @@ import config
 from hooks import (Capture, Intervene, add_noise, band_from_depth,
                    hook_census, n_layers)
 
-from loaders import MODEL
+from loaders import MODEL, load_real, load_tiny, pick_device
 # The one definition, from config. GSM8K-only probe, so it names the dataset.
 DIRECT_SUFFIX, DIRECT_PREFILL = config.direct_prompt("gsm8k")
 # GSM8K test id 733: direct-correct AND cot-correct in 630 tokens, nothink in
@@ -53,27 +53,10 @@ def kl(p_logits, q_logits):
     return float((p.exp() * (p - q)).sum())
 
 
-def load_real(device):
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-    tok = AutoTokenizer.from_pretrained(MODEL)
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL, dtype=torch.bfloat16).to(device).eval()
-    gc = model.generation_config
-    gc.do_sample = False
-    gc.temperature = gc.top_p = gc.top_k = None   # match the M4 manifest
-    return model, tok
-
-
-def load_tiny(device):
-    from transformers import Qwen3Config, Qwen3ForCausalLM
-    torch.manual_seed(0)
-    cfg = Qwen3Config(vocab_size=256, hidden_size=64, intermediate_size=128,
-                      num_hidden_layers=36, num_attention_heads=4,
-                      num_key_value_heads=2, head_dim=16,
-                      max_position_embeddings=4096, pad_token_id=0)
-    m = Qwen3ForCausalLM(cfg).to(device).eval()
-    m.generation_config.do_sample = False
-    return m, None
+# Loading comes from loaders (which pins the checkpoint revision), and no
+# longer from a copy here. The copy's greedy settings already had to be kept
+# byte-identical to the run's by hand -- a comment reading "match the manifest"
+# is the drift warning, not the guard.
 
 
 def get_question(tok, tiny):
@@ -95,7 +78,7 @@ def main(argv=None):
     ap.add_argument("--tiny", action="store_true")
     ap.add_argument("--device", default=None)
     a = ap.parse_args(argv)
-    device = a.device or ("cpu" if a.tiny else "mps")
+    device = pick_device(a.device, a.tiny)
 
     model, tok = (load_tiny if a.tiny else load_real)(device)
     NL = n_layers(model)
@@ -190,8 +173,16 @@ def main(argv=None):
           f"{'  completion' if not a.tiny else ''}")
     moved_logits = moved_text = None
     for alpha in (0.0, 1e-3, 4e-3, 1e-2, 3e-2, 1e-1, 3e-1, 1.0):
+        # ONE CONTEXT PER PASS. Intervene counts firings for the whole life of
+        # the context and refuses a second full-length one (hooks.NOCACHE_MSG),
+        # because absolute position accounting assumes prefill-then-one-token.
+        # Sharing a context across a scoring forward AND a generate made the
+        # generate's own prefill look like a re-prefill. Free to split:
+        # add_noise is a pure function of (seed, call_idx, layer), so both
+        # passes see identical noise either way.
         with Intervene(model, list(LIGHT), fn=add_noise(alpha)), torch.no_grad():
             lg = model(**enc).logits
+        with Intervene(model, list(LIGHT), fn=add_noise(alpha)), torch.no_grad():
             g = model.generate(**enc, max_new_tokens=32 if not a.tiny else 4)
         d = kl(clean[0, -1], lg[0, -1])
         same = bool(lg[0, -1].argmax() == clean[0, -1].argmax())

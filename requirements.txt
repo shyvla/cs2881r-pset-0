@@ -12,8 +12,21 @@
 # test_hooks.py needs neither weights nor a GPU -- it builds a randomly
 # initialised Qwen3 from config -- so CI can run it as a tripwire on the
 # transformers contract for free.
+#
+# TORCH IS PLATFORM-DEPENDENT and this line does not say which build: the same
+# `torch==2.13.0` resolves to a CUDA wheel on Linux and a Metal one on macOS.
+# That is deliberate -- the repo runs on both -- but it means the pin fixes the
+# torch VERSION and not the kernels, which is exactly why the device is
+# recorded per record and a run may not silently span two backends. See CLOUD.md
+# for the wheel index to install on a rented GPU.
 torch==2.13.0
 transformers==5.14.1
+# NOT optional and not for device_map: transformers 5 imports
+# transformers.integrations.accelerate at the top of modeling_utils, so
+# from_pretrained fails without it. Pinned like the rest because a loader that
+# changes how weights are materialised is a loader that can change the numbers.
+# This repo uses no accelerate API directly -- loading is single-device by
+# design (loaders.load_real).
 accelerate==1.14.0
 huggingface_hub==1.26.0
 datasets==5.0.1

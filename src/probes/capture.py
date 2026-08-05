@@ -1,6 +1,6 @@
 """Capture probe -- read one layer's activation and PROVE it is the right tensor.
 
-    python -m probes.capture          # real Qwen3-4B on mps
+    python -m probes.capture          # real Qwen3-4B, best available device
     python -m probes.capture --tiny   # weightless smoke test, seconds, no GPU
 
 No intervention anywhere in this file. Every check is falsifiable: it can come
@@ -19,7 +19,7 @@ import config
 from hooks import (Capture, band_from_depth, decoder_layers, final_norm,
                    hook_census, logit_lens, n_layers)
 
-from loaders import MODEL
+from loaders import MODEL, load_real, load_tiny, pick_device
 # Must match runs/archive/gsm8k_manifest.json -> conditions.direct_intact, or the
 # probe is measuring a condition that never ran. That is now enforced by
 # construction rather than by a copied string: config owns the one definition,
@@ -40,27 +40,11 @@ def check(name, ok, detail=""):
     return ok
 
 
-# ------------------------------------------------------------------- loading
-
-def load_real(device):
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-    tok = AutoTokenizer.from_pretrained(MODEL)
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL, dtype=torch.bfloat16).to(device).eval()
-    model.generation_config.do_sample = False   # greedy: determinism everywhere
-    return model, tok
-
-
-def load_tiny(device):
-    from transformers import Qwen3Config, Qwen3ForCausalLM
-    torch.manual_seed(0)
-    cfg = Qwen3Config(vocab_size=256, hidden_size=64, intermediate_size=128,
-                      num_hidden_layers=36, num_attention_heads=4,
-                      num_key_value_heads=2, head_dim=16,
-                      max_position_embeddings=4096, pad_token_id=0)
-    model = Qwen3ForCausalLM(cfg).to(device).eval()
-    model.generation_config.do_sample = False
-    return model, None
+# Loading comes from loaders, and no longer from a copy here. The copy loaded
+# the checkpoint by BRANCH while loaders pins a revision, so this probe could
+# assert a fingerprint against weights the run had never seen -- and its tiny
+# model left model.norm.weight at ones, where loaders gives it a real gain. A
+# probe that measures a different model than the run cannot calibrate it.
 
 
 def main(argv=None):
@@ -69,7 +53,7 @@ def main(argv=None):
     ap.add_argument("--device", default=None)
     ap.add_argument("--long-tokens", type=int, default=1500)
     a = ap.parse_args(argv)
-    device = a.device or ("cpu" if a.tiny else "mps")
+    device = pick_device(a.device, a.tiny)
 
     model, tok = (load_tiny if a.tiny else load_real)(device)
     NL = n_layers(model)

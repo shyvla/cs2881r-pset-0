@@ -1,7 +1,7 @@
 """Exclusion-exposure probe -- does the paper's exclusion rule actually bite
 during CoT generation?
 
-    python -m probes.exclusion            # real Qwen3-4B on mps
+    python -m probes.exclusion            # real Qwen3-4B, best available device
     python -m probes.exclusion --tiny     # weightless smoke test
 
 WHY THIS DECIDES SOMETHING. The paper exempts, at each position, the J-lens
@@ -48,7 +48,7 @@ import torch
 
 import config
 from hooks import Capture, n_layers, resolve_band, topk_tokens
-from loaders import load_real, load_tiny
+from loaders import load_real, load_tiny, pick_device
 
 BASELINE = "runs/archive/gsm8k_baseline.jsonl"
 # From the calibration run: direct condition, PREFILL positions, band 14-19.
@@ -77,7 +77,7 @@ def main(argv=None):
                     help="truncate long traces; activations are 7.7 MB/layer "
                          "per 1500 positions")
     a = ap.parse_args(argv)
-    device = a.device or ("cpu" if a.tiny else "mps")
+    device = pick_device(a.device, a.tiny)
 
     model, tok = (load_tiny if a.tiny else load_real)(device)
     NL = n_layers(model)

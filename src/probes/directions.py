@@ -1,7 +1,7 @@
 """Directions probe -- WHAT does the top-10 select, and how many
 directions are really in it?
 
-    python -m probes.directions           # real Qwen3-4B on mps
+    python -m probes.directions           # real Qwen3-4B, best available device
     python -m probes.directions --tiny    # weightless smoke test
 
 NOTHING IS GENERATED, SCORED, OR INTERVENED ON. This is pure measurement.
@@ -56,7 +56,7 @@ import torch
 import config
 from hooks import (Capture, band_from_depth, directions_for, n_layers,
                    topk_tokens)
-from loaders import load_real, load_tiny
+from loaders import load_real, load_tiny, pick_device
 from probes.calibrate import DIRECT_PREFILL, DIRECT_SUFFIX
 
 
@@ -204,7 +204,7 @@ def main(argv=None):
     ap.add_argument("--depth-profile", action="store_true",
                     help="step 3: all layers, answer position, whole pool")
     a = ap.parse_args(argv)
-    device = a.device or ("cpu" if a.tiny else "mps")
+    device = pick_device(a.device, a.tiny)
 
     model, tok = (load_tiny if a.tiny else load_real)(device)
     NL = n_layers(model)

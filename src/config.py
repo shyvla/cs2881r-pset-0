@@ -70,6 +70,83 @@ def problem_ids(n: int, dataset_size: int, seed: int = SEED) -> list[int]:
 # chosen band on the same problems and calling it confirmation.
 EXPLORED_N = 12
 
+# ...ON THIS DATASET. The band sweep ran on GSM8K problems, so problem_ids(12)
+# names the explored set for GSM8K ALONE. The same 12 indices on another
+# dataset are 12 arbitrary problems: nothing was selected on them, so removing
+# them buys no protection and the "holdout" label is simply false. analyze.py
+# reads this and reports the exploratory/holdout split only for this dataset --
+# it used to apply the split unconditionally, which on aime24 would have
+# discarded 40% of the run for nothing.
+EXPLORED_ON = "gsm8k"
+
+
+# n IS A PRE-REGISTRATION CHOICE, not a convenience default. It comes out of
+# power.py -- the accuracies, the measured rho and the looping rate give the n
+# at which the interaction is detectable -- and choosing it at the keyboard is
+# choosing how many problems to look at after seeing how the first ones went.
+#
+# It lives here for the same reason CAPS does: `--n 150` was an argparse
+# default, i.e. a GSM8K number silently applied to every dataset. On aime24 it
+# is not merely wrong but impossible (30 problems), and on math500 it is 30% of
+# the split with no stated justification.
+#
+# PER-DATASET because the power calculation is per-dataset: it depends on the
+# intact accuracies, and Qwen3-4B's accuracy on MATH-500 is not its accuracy on
+# GSM8K.
+N_DEFAULT = {
+    # The committed run. 150 was the power.py recommendation at the pilot's
+    # accuracies with rho=0.5.
+    "gsm8k": 150,
+
+    # DECIDED: 100. A fifth of the split, and deliberately not GSM8K's 150 --
+    # copying that number across would be inheriting a sample size derived from
+    # GSM8K accuracies and calling it a justification.
+    #
+    # STATED HONESTLY: this is a committed budget decision, NOT yet the output
+    # of a power run on MATH-500's own numbers -- those need the intact
+    # accuracies, which do not exist until the dataset has been run. Committing
+    # it before the data exists is what makes it a pre-registration rather than
+    # a number chosen once the CIs were visible, which is the property that
+    # matters here.
+    #
+    # WHAT TO DO WITH IT LATER: once the intact cells exist, run power.py at
+    # the observed accuracies with analysis.observed_rho, and REPORT the power
+    # this n actually had. If it is low, that is a stated limitation of a
+    # pre-registered design; it is not a licence to raise n and re-read the
+    # result. problem_ids is a shuffle prefix, so extending to 150 later is a
+    # strict superset and nothing already generated is wasted -- but an
+    # extension decided after seeing the interaction is a different experiment
+    # and has to be labelled as one.
+    "math500": 100,
+
+    # The WHOLE dataset, not a sample. 30 problems is what AIME 2024 has, so
+    # there is nothing to choose and nothing to power-analyse -- report it as
+    # the whole dataset. Note that at n=30 the CIs will be wide; that is a
+    # property of the benchmark, and the report should say so rather than
+    # implying a null.
+    "aime24": 30,
+}
+
+
+def n_default(dataset: str) -> int:
+    """The pre-registered problem count for `dataset`.
+
+    Raises rather than falling back to another dataset's n, for the same
+    reason cap_for does: the failure mode of a default is a GSM8K number
+    running under another dataset's filename.
+    """
+    if dataset not in N_DEFAULT:
+        raise KeyError(f"no N_DEFAULT for dataset {dataset!r}; "
+                       f"known: {sorted(N_DEFAULT)}")
+    n = N_DEFAULT[dataset]
+    if n is None:
+        raise ValueError(
+            f"N_DEFAULT[{dataset!r}] is unset -- an UNDECIDED "
+            f"pre-registration choice. Derive it from power.py and commit it "
+            f"before generating; a sample size chosen after seeing the first "
+            f"problems is the post-hoc rescue this file exists to prevent.")
+    return n
+
 
 def holdout_ids(n: int, dataset_size: int, seed: int = SEED) -> list[int]:
     """The confirmatory sample: problem_ids(n) minus the explored ones.
@@ -88,6 +165,17 @@ def holdout_ids(n: int, dataset_size: int, seed: int = SEED) -> list[int]:
 
 
 # ---------------------------------------------------------------- generation
+
+# The levels the MVP run actually generates. `nothink` is in LEVELS and in CAPS
+# as the middle rung of the externalisation axis, but run.conditions() builds
+# only these two, so a readiness check that demanded CAPS[d]['nothink'] would
+# block a dataset on a cap for a cell that is never generated. It went unnoticed
+# on GSM8K only because that entry happens to be set.
+#
+# run.conditions() iterates this, so the grid and the readiness check cannot
+# drift apart: adding `nothink` to the run means adding it here, which
+# immediately makes its cap a blocking requirement, which is correct.
+RUN_LEVELS = ("cot", "direct")
 
 # Keyed by DATASET, then by LEVEL. The cap is a property of how much the
 # condition writes, not of whether it is ablated, so the Half B states
@@ -130,6 +218,193 @@ CAPS = {
     "math500": {"cot": None, "nothink": None, "direct": None},
     "aime24": {"cot": None, "nothink": None, "direct": None},
 }
+
+
+# ------------------------------------------------- the calibration ceiling
+#
+# NOT a cap, and never used by a run that produces analysable data. This is the
+# ceiling for `run.py --calibrate-caps`, whose only job is to make the CAPS
+# entries above measurable instead of guessed.
+#
+# The chicken-and-egg it resolves: CAPS' own comment prescribes "run the intact
+# cells first, read the hit_cap rate, set these above it with headroom", but
+# every path to running anything went through cap_for(), which raises on an
+# unset cap. The prescribed measurement was not expressible. A guessed cap is
+# cheap to write and expensive to discover, because a binding cap looks exactly
+# like the ablation making the model fail to answer -- so the measurement has
+# to be reachable or the guess happens anyway.
+#
+# Chosen to be GENEROUS, not tight: the point is a distribution of n_tok that
+# is NOT censored, so that a percentile means what it says. Roughly 2.7x GSM8K's
+# cot cap and 4x its direct cap, which is the right order for datasets whose
+# traces are longer. --calibrate-caps reports the hit-rate AT this ceiling, so a
+# ceiling that still binds is visible rather than silently truncating the very
+# distribution being measured.
+#
+# INTACT CELLS ONLY. Ablated generations run longer and loop, so calibrating a
+# cap on them would size it to degenerate behaviour -- and it would also mean
+# seeing ablated outcomes before the pre-registration is closed, which is the
+# thing this file exists to prevent.
+MEASURE_CAP = {"cot": 8192, "nothink": 2048, "direct": 512}
+
+# Headroom over the measured distribution when suggesting a cap. 1.5x the p99,
+# rounded up to a multiple of 128. Stated here rather than buried in run.py
+# because it is the rule that turns a measurement into a pre-registered number,
+# and a later reader should be able to disagree with it.
+CAP_HEADROOM = 1.5
+CAP_ROUNDING = 128
+
+
+def suggest_cap(n_tok: list[int]) -> int:
+    """A cap suggestion from observed intact generation lengths.
+
+    Deliberately a SUGGESTION printed by --calibrate-caps, never written to
+    CAPS automatically: a pre-registration choice that a script can edit is not
+    a pre-registration. The caller commits it by hand, which is what makes it
+    reviewable as a diff.
+    """
+    if not n_tok:
+        raise ValueError("no generations to size a cap from")
+    ordered = sorted(n_tok)
+    # p99 by nearest-rank, which on a small sample is simply the max -- the
+    # honest behaviour, since at n=20 there is no 99th percentile to estimate.
+    p99 = ordered[min(len(ordered) - 1, int(0.99 * len(ordered)))]
+    want = CAP_HEADROOM * max(p99, 1)
+    return int(CAP_ROUNDING * -(-want // CAP_ROUNDING))
+
+
+# ------------------------------------- WHICH problems the calibration reads
+#
+# NOT a random sample, and the reason is that the cap's loss is ASYMMETRIC. A
+# cap set too low converts verbosity into wrongness, and does it preferentially
+# in the degraded cells -- straight into the interaction term. A cap set too
+# high costs GPU seconds, and only on the generations that would have run away
+# anyway, since a short answer terminates early whatever the ceiling is.
+#
+# So the quantity the cap has to clear is the UPPER TAIL of the length
+# distribution, and a random 20 drawn from a run of 100 systematically
+# underestimates the maximum of 100. CAP_HEADROOM was silently doing that job;
+# sampling the hard end replaces a fudge factor with a measurement.
+#
+# Both datasets carry a difficulty signal (scoring.DIFFICULTY), so this is
+# selection on METADATA, never on outcome data -- no result is looked at, and
+# the garden of forking paths that EXPLORED_N records does not apply. It is
+# nonetheless a pre-registered choice, committed here rather than typed at the
+# keyboard, because "which problems did you measure on" changes the number.
+#
+#   difficulty    inclusive range on scoring.DIFFICULTY. The CAP SAMPLE.
+#   n             how many to draw from it.
+#   contrast      an EASIER range, drawn only to check that difficulty really
+#                 does predict length. NEVER feeds the cap suggestion -- easier
+#                 problems are shorter and would drag the percentile down.
+#   disjoint_from_run  exclude the run's own sample, where the split is big
+#                 enough to afford it.
+CALIB_SAMPLE = {
+    # Caps already committed and the data already generated. Nothing to draw.
+    "gsm8k": None,
+
+    # 134 of the 500 problems are level 5, and only 31 of those fall inside the
+    # n=100 run sample -- so 20 can be drawn from the 103 the run will never
+    # touch, with the pool still five times the draw. Worst-case coverage AND
+    # zero overlap with the analysed sample, which is the one combination a
+    # prefix of the run sample cannot give.
+    #
+    # 20 rather than 15 because the number this sample exists to estimate is a
+    # TAIL, and the tail is what a small sample estimates worst: suggest_cap
+    # reads the p99 by nearest rank, which at n=15 or n=20 is simply the
+    # longest trace observed. More draws is a longer observed maximum and a
+    # cap less likely to bind on the run. The cost is 5 more intact
+    # generations, paid once.
+    #
+    # The 5 level-3 problems are the monotonicity check, and stay at 5 -- they
+    # never enter the cap arithmetic, so more of them would buy nothing. If
+    # level 3 traces come out LONGER than level 5, the premise of this whole
+    # sampling rule is wrong and cap_report says so instead of quietly sizing
+    # on the wrong tail.
+    "math500": {"difficulty": (5, 5), "n": 20,
+                "contrast": (3, 3), "contrast_n": 5,
+                "disjoint_from_run": True},
+
+    # 30 problems, all of them in the run, so there is nothing to hold out and
+    # `disjoint_from_run` would leave an empty pool. Problems 11-15 of each
+    # exam give 10 at the hard end -- BETTER than a random 20 on both counts:
+    # a third of the dataset instead of two thirds, and the tail instead of the
+    # middle.
+    #
+    # No contrast group: 11-15 already spans five difficulty values, so the
+    # slope is visible inside the cap sample itself. Adding easier problems
+    # here would only push the overlap with the run back up, which is the thing
+    # the smaller n was chosen to avoid.
+    "aime24": {"difficulty": (11, 15), "n": 10,
+               "contrast": None, "contrast_n": 0,
+               "disjoint_from_run": False},
+}
+
+
+def calib_n(dataset: str) -> int:
+    """How many problems the calibration will generate, cap + contrast.
+
+    Derivable without loading the dataset, so the output filename is known
+    before anything is downloaded.
+    """
+    spec = CALIB_SAMPLE.get(dataset)
+    if spec is None:
+        raise ValueError(f"no CALIB_SAMPLE rule for {dataset!r}")
+    return spec["n"] + spec["contrast_n"]
+
+
+def calib_ids(dataset: str, difficulty, run_n: int | None = None,
+              seed: int = SEED) -> dict:
+    """The calibration sample, as {"cap": [ids], "contrast": [ids]}.
+
+    `difficulty` is a sequence of per-problem difficulty values indexed by
+    problem id -- built by the caller from scoring.difficulty_of, because
+    reading a record is scoring's job and choosing which records is this
+    file's.
+
+    Shuffled with SEED and taken as a prefix, exactly like problem_ids, so a
+    calibration re-run at a larger n is a superset of the smaller one and the
+    two are comparable.
+    """
+    spec = CALIB_SAMPLE.get(dataset)
+    if spec is None:
+        raise ValueError(
+            f"CALIB_SAMPLE[{dataset!r}] is None -- no calibration sampling "
+            f"rule is pre-registered for this dataset. gsm8k's caps are "
+            f"already committed; for anything else, add a rule to config.py "
+            f"and commit it before measuring.")
+
+    exclude = set()
+    if spec["disjoint_from_run"]:
+        if run_n is None:
+            raise ValueError(
+                f"CALIB_SAMPLE[{dataset!r}] asks to exclude the run sample but "
+                f"no run n is known -- set N_DEFAULT[{dataset!r}] first, or the "
+                f"'disjoint' claim is unverifiable.")
+        exclude = set(problem_ids(run_n, len(difficulty), seed))
+
+    def draw(rng_range, k, label):
+        if not k or rng_range is None:
+            return []
+        lo, hi = rng_range
+        pool = [i for i, d in enumerate(difficulty)
+                if d is not None and lo <= d <= hi and i not in exclude]
+        if len(pool) < k:
+            raise ValueError(
+                f"{dataset} {label} sample wants {k} problems with difficulty "
+                f"in [{lo}, {hi}]"
+                + (f" outside the n={run_n} run sample" if exclude else "")
+                + f", but only {len(pool)} exist. Either the difficulty field "
+                  f"did not read (scoring.DIFFICULTY[{dataset!r}]) or "
+                  f"CALIB_SAMPLE[{dataset!r}] asks for more than the split "
+                  f"holds.")
+        rng = random.Random(seed)
+        rng.shuffle(pool)
+        return sorted(pool[:k])
+
+    return {"cap": draw(spec["difficulty"], spec["n"], "cap"),
+            "contrast": draw(spec["contrast"], spec["contrast_n"],
+                             "contrast")}
 
 
 def cap_for(cond: str, dataset: str) -> int:
@@ -184,23 +459,34 @@ DIRECT_INSTRUCTION = {
     "gsm8k": ("\n\nRespond with only the final numeric answer and nothing "
               "else. Do not show any reasoning."),
 
-    # UNDECIDED. GSM8K's wording is WRONG here and must not be reused: it asks
-    # for "the final numeric answer", and MATH-500 answers frequently are not
-    # numeric -- \frac{3}{2}, 2\sqrt{2}, \frac{\pi}{2}, (2,5), intervals.
-    # test_scoring.py already carries all of those shapes, so the SCORER
-    # handles them; it is the PROMPT that would be instructing the model away
-    # from the format its own gold uses. That inflates `unparsed`, and it does
-    # so preferentially in the degraded (ablated) cells, which puts the
-    # artifact straight into the interaction term.
-    "math500": None,
+    # DECIDED: GSM8K's wording MINUS the word "numeric", and nothing else.
+    #
+    # GSM8K's string is wrong here and must not be reused: it asks for "the
+    # final numeric answer", and MATH-500 answers frequently are not numeric --
+    # \frac{3}{2}, 2\sqrt{2}, \frac{\pi}{2}, (2,5), intervals. test_scoring.py
+    # already carries all of those shapes, so the SCORER handles them; it is
+    # the PROMPT that would be instructing the model away from the format its
+    # own gold uses. That inflates `unparsed`, and it does so preferentially in
+    # the degraded (ablated) cells, which puts the artifact straight into the
+    # interaction term.
+    #
+    # WHY A ONE-WORD EDIT rather than a better prompt. The direct condition's
+    # job is to be the SAME instruction across datasets, differing only where a
+    # dataset forces it to: any other wording change would confound "MATH-500
+    # is harder" with "MATH-500 was asked differently". The \boxed{} prefill --
+    # which is what actually makes the condition direct -- is identical across
+    # all three, and no format instruction is needed because the prefill has
+    # already committed the model to the format the scorer reads.
+    "math500": ("\n\nRespond with only the final answer and nothing else. "
+                "Do not show any reasoning."),
 
-    # UNDECIDED, but nearly free: AIME answers ARE integers 0-999 (which
-    # scoring.validate_gold already enforces), so GSM8K's wording is
-    # semantically correct as written and can most likely be adopted verbatim.
-    # Left unset anyway, because "most likely" is not a pre-registration -- the
-    # point of this file is that the choice is made deliberately, in a commit,
-    # before the data exists.
-    "aime24": None,
+    # DECIDED: GSM8K's wording VERBATIM. AIME answers ARE integers 0-999 (which
+    # scoring.validate_gold enforces), so "the final numeric answer" is
+    # semantically correct as written, and the byte-identical string keeps the
+    # aime24 and gsm8k direct cells as close to the same condition as two
+    # datasets allow.
+    "aime24": ("\n\nRespond with only the final numeric answer and nothing "
+               "else. Do not show any reasoning."),
 }
 
 
@@ -225,7 +511,8 @@ def direct_prompt(dataset: str) -> tuple[str, str]:
     return suffix, DIRECT_PREFILL
 
 
-def dataset_ready(dataset: str) -> list[str]:
+def dataset_ready(dataset: str, levels=RUN_LEVELS,
+                  need_n: bool = True) -> list[str]:
     """Which per-dataset pre-registration choices are still unset.
 
     Empty means the dataset can be run. The per-dataset counterpart to
@@ -233,11 +520,27 @@ def dataset_ready(dataset: str) -> list[str]:
     operate on module globals, and a nested table entry is not one. The
     accessors above raise on their own behalf; this reports the same thing
     without raising, for a pre-flight or a report appendix.
+
+    SCOPED TO `levels`, which is what the caller is actually going to generate.
+    Two things were previously demanded that no run needed:
+
+      * CAPS[d]['nothink'], for a cell run.conditions() does not build. See
+        RUN_LEVELS.
+      * DIRECT_INSTRUCTION[d] for a cot-only staged run, which never renders a
+        direct prompt. The file is resumable and `--only` exists precisely so
+        the arms can be paid for separately, so a staged cot run must not be
+        blocked on a choice belonging to the other arm.
+
+    `need_n` is False for callers that were given an explicit `--n` and
+    therefore do not consult N_DEFAULT.
     """
+    caps = CAPS.get(dataset, {})
     out = [f"CAPS[{dataset!r}][{lvl!r}]"
-           for lvl, cap in sorted(CAPS.get(dataset, {}).items()) if cap is None]
-    if DIRECT_INSTRUCTION.get(dataset, None) is None:
+           for lvl in sorted(levels) if caps.get(lvl, None) is None]
+    if "direct" in levels and DIRECT_INSTRUCTION.get(dataset, None) is None:
         out.append(f"DIRECT_INSTRUCTION[{dataset!r}]")
+    if need_n and N_DEFAULT.get(dataset, None) is None:
+        out.append(f"N_DEFAULT[{dataset!r}]")
     return out
 
 
@@ -419,11 +722,14 @@ UNUSABLE_OUTCOMES = ("incomplete", "unparsed", "error")
 # that is later unset -- or misspelled -- cannot pass silently.
 #
 # SCOPE. This dict holds module GLOBALS, which is all require() can reach. The
-# per-dataset tables (CAPS, DIRECT_INSTRUCTION) have open entries for math500
-# and aime24; those are nested, so they are gated by cap_for() and
-# direct_prompt() raising on their own behalf, and reported without raising by
-# dataset_ready(). "Empty" here therefore does NOT mean the whole
-# pre-registration is closed -- ask dataset_ready(d) per dataset.
+# per-dataset tables (CAPS, DIRECT_INSTRUCTION, N_DEFAULT) have open entries for
+# math500 and aime24; those are nested, so they are gated by cap_for(),
+# direct_prompt() and n_default() raising on their own behalf, and reported
+# without raising by dataset_ready(). "Empty" here therefore does NOT mean the
+# whole pre-registration is closed -- ask dataset_ready(d) per dataset.
+# Currently open: every CAPS entry for math500 and aime24, and nothing else --
+# measure them with `run.py --calibrate-caps`. The direct-condition prompts and
+# the sample sizes are settled for all three.
 _UNDECIDED = {}
 
 

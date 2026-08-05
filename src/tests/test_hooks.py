@@ -862,24 +862,139 @@ def test_math500_prompt_is_not_silently_gsm8ks():
     """GSM8K's wording asks for "the final numeric answer" and MATH-500
     answers are frequently \\frac{3}{2}, 2\\sqrt{2}, (2,5). Inheriting it would
     instruct the model away from the format its own gold uses, inflating
-    `unparsed` preferentially in the degraded cells."""
-    for d in ("math500", "aime24"):
-        try:
-            config.direct_prompt(d)
-        except ValueError:
-            continue
-        raise AssertionError(f"{d} returned a prompt it never pre-registered")
+    `unparsed` preferentially in the degraded cells.
+
+    This used to assert math500 was UNSET. Now that it is decided, the thing
+    worth pinning is the property the decision had to satisfy -- a test that
+    only says "undecided" turns settling the choice into a red build."""
+    g, _ = config.direct_prompt("gsm8k")
+    m, _ = config.direct_prompt("math500")
+    assert "numeric" in g, g
+    assert "numeric" not in m, m
+    # ...and differs from GSM8K in nothing else. Any further rewording would
+    # confound "MATH-500 is harder" with "MATH-500 was asked differently".
+    assert m == g.replace(" numeric", ""), (m, g)
+
+
+def test_aime_prompt_is_deliberately_gsm8ks_verbatim():
+    """AIME answers are integers 0-999 (validate_gold enforces it), so "the
+    final numeric answer" is correct as written and the byte-identical string
+    keeps the two direct cells as close to one condition as two datasets
+    allow. Pinned because it must be a DECISION, not a copy-paste nobody
+    revisits."""
+    assert config.direct_prompt("aime24") == config.direct_prompt("gsm8k")
+
+
+def test_every_dataset_shares_the_boxed_prefill():
+    """The prefill is what makes the direct condition direct, and
+    scoring's extraction_mode="first_match" is built on it. A dataset whose
+    prefill drifted would be a different condition under the same name."""
+    for d in ("gsm8k", "math500", "aime24"):
+        assert config.direct_prompt(d)[1] == "\\boxed{", d
 
 
 def test_dataset_ready_reports_what_the_accessors_raise_on():
     """_UNDECIDED and require() reach globals only, so the nested per-dataset
-    tables need their own reporting -- and it must agree with the accessors."""
-    assert config.dataset_ready("gsm8k") == [], config.dataset_ready("gsm8k")
-    for d in ("math500", "aime24"):
+    tables need their own reporting -- and it must agree with the accessors.
+
+    Tests the AGREEMENT, not which items happen to be open, so settling a
+    choice does not turn this red."""
+    for d in ("gsm8k", "math500", "aime24"):
         open_items = config.dataset_ready(d)
-        assert open_items, f"{d} claims to be runnable"
-        assert any("DIRECT_INSTRUCTION" in k for k in open_items), open_items
-        assert any("CAPS" in k for k in open_items), open_items
+        for level in config.RUN_LEVELS:
+            raised = False
+            try:
+                config.cap_for(f"{level}_intact", d)
+            except ValueError:
+                raised = True
+            assert raised == (f"CAPS[{d!r}][{level!r}]" in open_items), (
+                d, level, open_items)
+        raised = False
+        try:
+            config.n_default(d)
+        except ValueError:
+            raised = True
+        assert raised == (f"N_DEFAULT[{d!r}]" in open_items), (d, open_items)
+
+
+def test_dataset_ready_is_scoped_to_the_levels_being_run():
+    """Two things were demanded that no run needed: a cap for `nothink`, which
+    conditions() never builds, and the direct prompt for a cot-only staged run.
+    Both blocked a dataset on a choice belonging to a cell that would not be
+    generated."""
+    saved = config.CAPS["gsm8k"]["nothink"]
+    try:
+        config.CAPS["gsm8k"]["nothink"] = None
+        assert config.dataset_ready("gsm8k") == [], (
+            "an unset nothink cap blocked a cot+direct run")
+    finally:
+        config.CAPS["gsm8k"]["nothink"] = saved
+
+    # A cot-only stage must not need the direct arm's prompt.
+    saved = config.DIRECT_INSTRUCTION["gsm8k"]
+    try:
+        config.DIRECT_INSTRUCTION["gsm8k"] = None
+        assert config.dataset_ready("gsm8k", levels=("cot",)) == []
+        assert config.dataset_ready("gsm8k") == \
+               ["DIRECT_INSTRUCTION['gsm8k']"]
+    finally:
+        config.DIRECT_INSTRUCTION["gsm8k"] = saved
+
+    # need_n=False for a caller that was handed an explicit --n.
+    saved = config.N_DEFAULT["gsm8k"]
+    try:
+        config.N_DEFAULT["gsm8k"] = None
+        assert "N_DEFAULT['gsm8k']" in config.dataset_ready("gsm8k")
+        assert "N_DEFAULT['gsm8k']" not in config.dataset_ready(
+            "gsm8k", need_n=False)
+    finally:
+        config.N_DEFAULT["gsm8k"] = saved
+
+
+def test_n_default_refuses_to_borrow_another_datasets_n():
+    """`--n 150` was an argparse literal: a GSM8K number, impossible on aime24
+    (30 problems) and unjustified elsewhere. So an unset n must raise rather
+    than fall back to another dataset's.
+
+    Tests the MECHANISM against a temporarily-unset entry rather than against
+    whichever dataset is currently open -- pinning "math500 is undecided" would
+    make settling it a red build."""
+    assert config.n_default("gsm8k") == 150
+    assert config.n_default("aime24") == 30, "aime24 must be the whole split"
+    saved = config.N_DEFAULT["gsm8k"]
+    try:
+        config.N_DEFAULT["gsm8k"] = None
+        for bad, exc in (("gsm8k", ValueError), ("nonsense", KeyError)):
+            try:
+                config.n_default(bad)
+            except exc:
+                continue
+            raise AssertionError(f"n_default({bad!r}) should have raised")
+    finally:
+        config.N_DEFAULT["gsm8k"] = saved
+
+
+def test_suggest_cap_clears_the_distribution_it_was_given():
+    """The suggestion has to exceed everything observed, or the cap it
+    recommends binds on data already in hand."""
+    for sample in ([7], [1, 2, 3], list(range(200)), [3000] * 5):
+        assert config.suggest_cap(sample) > max(sample), sample
+        assert config.suggest_cap(sample) % config.CAP_ROUNDING == 0, sample
+    try:
+        config.suggest_cap([])
+    except ValueError:
+        return
+    raise AssertionError("an empty sample cannot size a cap")
+
+
+def test_measure_cap_exceeds_every_committed_cap():
+    """MEASURE_CAP is a ceiling for calibration, so it must be looser than any
+    cap it could ever be used to size -- otherwise the measurement is censored
+    below the answer."""
+    for dataset, caps in config.CAPS.items():
+        for level, cap in caps.items():
+            if cap is not None:
+                assert config.MEASURE_CAP[level] > cap, (dataset, level)
 
 
 def test_bands_translate_to_the_documented_layers():

@@ -1,6 +1,6 @@
 """Calibration -- can the ablation move the outcome measure at all?
 
-    python -m probes.calibrate           # real Qwen3-4B on mps
+    python -m probes.calibrate           # real Qwen3-4B, best available device
     python -m probes.calibrate --tiny    # weightless smoke test
 
 NO ABLATED DATA IS PRODUCED HERE. Nothing is generated and nothing is scored.
@@ -43,7 +43,7 @@ import config
 from hooks import (Capture, Intervene, band_from_depth, directions_for,
                    make_ablation, n_layers, project_out, resolve_band,
                    topk_tokens)
-from loaders import MODEL, load_real, load_tiny
+from loaders import MODEL, load_real, load_tiny, pick_device
 
 # From config, not a fourth copy of the string. These probes are GSM8K-only
 # measurements, so they ask for the GSM8K prompt explicitly. The directions
@@ -121,7 +121,7 @@ def main(argv=None):
                          "so widening one also moves it later -- band POSITION "
                          "and band WIDTH cannot be separated without this.")
     a = ap.parse_args(argv)
-    device = a.device or ("cpu" if a.tiny else "mps")
+    device = pick_device(a.device, a.tiny)
     use_ex = (config.USE_EXCLUSION if a.exclusion is None
               else a.exclusion == "on")
     # Resolved here, beside the other overrides, so the banner and the

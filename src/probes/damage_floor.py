@@ -1,6 +1,6 @@
 """The automatic-task damage floor -- is the model ablated, or just broken?
 
-    python -m probes.damage_floor            # real Qwen3-4B on mps
+    python -m probes.damage_floor            # real Qwen3-4B, best available device
     python -m probes.damage_floor --tiny     # weightless smoke test
 
 WHAT THIS IS FOR. The assignment requires controls that separate a real
@@ -51,7 +51,7 @@ import torch
 
 import config
 from hooks import Intervene, make_ablation, n_layers, resolve_band
-from loaders import load_real, load_tiny
+from loaders import load_real, load_tiny, pick_device
 from probes.calibrate import mcnemar, wilson
 
 SST2_SUFFIX = ("\n\nIs the sentiment of this sentence positive or negative? "
@@ -186,7 +186,7 @@ def main(argv=None):
     ap.add_argument("--gain", default=None, choices=("true", "false"),
                     help="override config.PROJECT_GAIN_SCALED")
     a = ap.parse_args(argv)
-    device = a.device or ("cpu" if a.tiny else "mps")
+    device = pick_device(a.device, a.tiny)
     mode, gain = config.projection(
         a.mode, None if a.gain is None else a.gain == "true")
     use_ex = (config.USE_EXCLUSION if a.exclusion is None

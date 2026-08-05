@@ -243,14 +243,32 @@ def test_dataset_registry_is_complete_and_consistent():
     import config
     from scoring import DATASETS, GOLD_FIELD
     assert set(DATASETS) == set(GOLD_FIELD) == set(config.CAPS) \
-           == set(config.DIRECT_INSTRUCTION), (
+           == set(config.DIRECT_INSTRUCTION) == set(config.N_DEFAULT), (
         sorted(DATASETS), sorted(GOLD_FIELD), sorted(config.CAPS),
-        sorted(config.DIRECT_INSTRUCTION))
+        sorted(config.DIRECT_INSTRUCTION), sorted(config.N_DEFAULT))
     for d, spec in DATASETS.items():
         assert spec["mirrors"] and all(len(m) == 2 for m in spec["mirrors"]), d
         assert spec["question"], d
         assert spec["rows"] > 0, d
+        # A pre-registered n larger than the split is not a sample, it is an
+        # impossibility -- and the point of check_n is that it costs nothing to
+        # notice. aime24 is the whole split, so equality is allowed.
+        n = config.N_DEFAULT[d]
+        assert n is None or 0 < n <= spec["rows"], (d, n, spec["rows"])
     print("ok   dataset registry keys agree across scoring and config")
+
+
+def test_level_tables_cover_every_level():
+    """CAPS is keyed dataset->level and MEASURE_CAP level->ceiling. A level in
+    one and missing from the other is how --calibrate-caps would KeyError after
+    the model is resident, having resolved its cells from a third place."""
+    import config
+    from scoring import LEVELS
+    for d, caps in config.CAPS.items():
+        assert set(caps) == set(LEVELS), (d, sorted(caps), sorted(LEVELS))
+    assert set(config.MEASURE_CAP) == set(LEVELS), sorted(config.MEASURE_CAP)
+    assert set(config.RUN_LEVELS) <= set(LEVELS), config.RUN_LEVELS
+    print("ok   CAPS and MEASURE_CAP cover scoring.LEVELS")
 
 
 def test_question_field_resolves_or_names_the_keys_it_found():
@@ -285,6 +303,25 @@ def test_run_path_is_the_one_filename_construction():
            "runs/math500_n500_light.jsonl"
     assert "(" not in run_path("gsm8k", 12, "range14, 20")
     print("ok   run_path")
+
+
+def test_resolve_anchors_a_run_name_to_src_from_any_cwd():
+    """The NAME is relative (above, pinned); what it means must not depend on
+    where python was launched. Run from the repo root, "runs/..." used to be a
+    fresh empty directory beside the caller: the run silently regenerated
+    everything it had already produced, and analyze.py looked elsewhere for
+    it."""
+    import os
+
+    from scoring import resolve, run_path
+    here = os.path.dirname(os.path.abspath(__file__))
+    src = os.path.dirname(here)
+    got = resolve(run_path("gsm8k", 150, "light"))
+    assert got == os.path.join(src, "runs/gsm8k_n150_light.jsonl"), got
+    assert os.path.isabs(got)
+    # An explicit --out means exactly what the caller typed.
+    assert resolve("/tmp/x.jsonl") == "/tmp/x.jsonl"
+    print("ok   resolve")
 
 
 def test_provenance():
@@ -322,10 +359,12 @@ def _run_all():
     test_unpack_cond()
     test_render_prompt_and_prefill()
     test_dataset_registry_is_complete_and_consistent()
+    test_level_tables_cover_every_level()
     test_question_field_resolves_or_names_the_keys_it_found()
     test_run_path_is_the_one_filename_construction()
+    test_resolve_anchors_a_run_name_to_src_from_any_cwd()
     test_provenance()
-    print(f"\nALL PASS ({len(TESTS)} scoring cases + 12 unit tests)")
+    print(f"\nALL PASS ({len(TESTS)} scoring cases + 13 unit tests)")
 
 
 if __name__ == "__main__":
