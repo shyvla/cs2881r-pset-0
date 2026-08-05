@@ -1,8 +1,14 @@
 {
  "model_revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+ "hardware": {
+  "device": "cuda",
+  "backend": "cuda",
+  "torch": "2.13.0+cu130",
+  "gpu": "NVIDIA GeForce RTX 4090"
+ },
  "dataset": {
   "rows": 1319,
-  "fingerprint": "415204891c496fb7",
+  "fingerprint": "59ec1b7f9357c7a2",
   "download_size": 2725633,
   "dataset": "gsm8k",
   "path": "openai/gsm8k",
@@ -162,5 +168,13 @@
    1302
   ],
   "content_sha256": "81edd14d79bec0c3"
- }
+ },
+ "hardware_history": [
+  {
+   "device": "cuda",
+   "backend": "cuda",
+   "torch": "2.13.0+cu130",
+   "gpu": "NVIDIA GeForce RTX 4090"
+  }
+ ]
 }
