@@ -330,11 +330,15 @@ CAPS = {
     # DECIDED, from the two-step calibration MEASURE_CAP prescribes, with the
     # censoring disclosed rather than dressed up:
     #
-    # cot = 16384, A BUDGET CAP AT THE MEASUREMENT CEILING, not a cleared
-    # tail. The 8192 calibration censored at 35%; the 16384 re-measurement
-    # (runs/calib_math500_n25.jsonl) still censored at exactly 15% -- 3 of 20,
-    # ON the CEILING_RETRY_MAX_HIT boundary, where another doubling is
-    # permitted but no longer prescribed. We stop, per the rule's own
+    # cot = 16384, A BUDGET CAP AT THE CEILING IT WAS MEASURED AT -- which was
+    # MEASURE_CAP['cot'] at the time of the measurement, since raised to 40960
+    # for aime24. This cap is NOT re-opened by that raise: it was committed on
+    # the 16384 measurement under the stopping rule, and a ceiling that moved
+    # afterwards is not new information about this dataset. It is a budget cap,
+    # not a cleared tail. The 8192 calibration censored at 35%; the 16384
+    # re-measurement (runs/calib_math500_n25.jsonl) still censored at exactly
+    # 15% -- 3 of 20, ON the CEILING_RETRY_MAX_HIT boundary, where another
+    # doubling is permitted but no longer prescribed. We stop, per the rule's own
     # rationale: the level-5 tail does not reliably terminate (median 6070,
     # p90 at the ceiling), each doubling re-prices the whole cot arm, and an
     # unbounded tail cannot be chased to a cap. CONSEQUENCES, to be reported
@@ -359,13 +363,63 @@ CAPS = {
     # the ablated states a calibration never sees.
     "math500": {"cot": 16384, "nothink": None, "direct": 128},
 
-    # UNDECIDED, and deliberately NOT copied from GSM8K or MATH-500. Needs a
-    # measured cap before any ablated data exists: run the intact cells
-    # first, read the hit_cap rate, set these above it with headroom. A
-    # guessed cap is cheap to write and expensive to discover, because a
-    # binding cap looks exactly like the ablation making the model fail to
-    # answer.
-    "aime24": {"cot": None, "nothink": None, "direct": None},
+    # cot = 32768, DECIDED WITHOUT A CALIBRATION and committed as such.
+    #
+    # This is the one cap here that no measurement stands behind: AIME24 has
+    # never been calibrated, so the honest description is a BUDGET CEILING
+    # chosen from the checkpoint's own limit, not a cleared tail. What makes it
+    # defensible rather than a guess is that it is not interpolated from the
+    # other datasets -- it is bounded by the model. Qwen3-4B pins
+    # max_position_embeddings = 40960 (see MEASURE_CAP), and a cap must leave
+    # prompt headroom under that, so 32768 is the largest round cap available
+    # with ~8k positions to spare. There is no larger number to reach for, and
+    # therefore no version of this choice that a later measurement could
+    # reveal to be stingy: if traces still run to 32768, the finding is that
+    # Qwen3-4B does not terminate on AIME, which is the stopping rule's own
+    # conclusion reached without paying for the doublings.
+    #
+    # WHAT IS GIVEN UP, and must be reported: the `incomplete` rate at this cap
+    # is UNKNOWN in advance. On math500 the equivalent number was measured
+    # (15% of the hard tail at 16384) and could be disclosed as a limitation
+    # with a magnitude; here it can only be read off the run itself. Report the
+    # per-cell hit_cap and `incomplete` composition alongside the accuracies,
+    # and note that no cap calibration preceded the run. `--calibrate-caps
+    # --dataset aime24` remains available if that trade is later judged wrong;
+    # it would cost ~10 intact generations at the 40960 ceiling.
+    #
+    # WHY NOT SMALLER, given AIME is 30 problems: a cap that binds is a
+    # DIFFERENTIAL bias -- it converts verbosity into wrongness preferentially
+    # in the degraded cells, straight into the interaction term -- while a cap
+    # that is loose costs GPU seconds only on generations that were running
+    # away regardless. At n=30 the CIs are wide already; spending seconds to
+    # keep the cap off the interaction is the correct side of that asymmetry.
+    #
+    # direct = 512, and deliberately NOT the 128 the other two datasets
+    # committed. Those numbers rest on measurements AIME has never had (a
+    # GSM8K intervention probe, a math500 calibration), so inheriting 128 here
+    # would be borrowing a justification rather than making one. Absent a
+    # measurement, the choice is settled by the cap's ASYMMETRY instead: a cap
+    # that binds converts verbosity into wrongness, and does it preferentially
+    # in the degraded cells -- straight into the interaction term -- while a
+    # cap that is loose costs seconds only on generations that were running
+    # away regardless. 512 buys the loose side for ~46k tokens across all
+    # three direct cells at n=30, i.e. minutes.
+    #
+    # The scorer is indifferent to the slack: extraction_mode="first_match"
+    # takes the first \boxed{}, which the prefill has already opened, so junk
+    # after the answer cannot change a score. What the slack protects against
+    # is the reachable case where an intervened generation never closes the
+    # brace inside the cap, and truncation does part of the ablation's work.
+    #
+    # NOTE it equals MEASURE_CAP['direct'], so a future aime24 calibration
+    # would measure this arm AT its cap and could show no headroom. That is
+    # acceptable only because nothing is committed FROM such a measurement:
+    # this cap is already decided. Raise the ceiling first if the direct arm
+    # is ever calibrated here.
+    #
+    # `nothink` stays UNDECIDED and blocks nothing -- it is not in RUN_LEVELS,
+    # so run.conditions() never builds it.
+    "aime24": {"cot": 32768, "nothink": None, "direct": 512},
 }
 
 
@@ -398,7 +452,37 @@ CAPS = {
 # censored: 35% of the 20 level-5 problems ran to 8192, with a median of 6684,
 # so a real part of the mass sits just above the old ceiling. The direct
 # ceiling is untouched -- it measured a max of 10 tokens against 512.
-MEASURE_CAP = {"cot": 16384, "nothink": 2048, "direct": 512}
+#
+# cot RAISED AGAIN 16384 -> 40960, to the CHECKPOINT'S OWN WALL. Qwen3-4B's
+# config.json (loaders.MODEL_REVISION) sets max_position_embeddings = 40960
+# with rope_scaling None, so 40960 is the largest ceiling reachable without
+# enabling YaRN -- and enabling YaRN would change RoPE at every position, i.e.
+# generate from a different model configuration than the one pinned. There is
+# no ceiling above this one to raise to later, which is what makes it the
+# right place to stop: the stopping rule's "do not raise again" is enforced by
+# arithmetic here rather than by discipline.
+#
+# NOTE the position accounting: max_position_embeddings bounds PROMPT +
+# GENERATION, while a cap is max_new_tokens alone. A cap AT 40960 would push
+# the last few hundred positions past the trained range, where RoPE
+# extrapolates rather than erroring. So this ceiling is usable as a
+# MEASUREMENT ceiling (nothing is committed from a censored measurement
+# anyway) but a committed cap must leave prompt headroom -- aime24's 32768
+# does, with ~8k to spare.
+#
+# TWO CONSEQUENCES of the raise, both intended:
+#   * MEASURE_CAP is per-LEVEL, not per-dataset, so this ceiling now sits
+#     above math500's committed cot cap of 16384. That cap was committed AT
+#     the ceiling in force when it was measured; it is not re-opened by a
+#     later raise, and the CAPS entry records which ceiling its numbers came
+#     from.
+#   * resume_scan refuses to resume a calibration file whose records were
+#     measured below the current ceiling, so runs/calib_math500_n25.jsonl
+#     (measured at 16384) will no longer resume. Correct: its distribution is
+#     censored relative to this ceiling. Nothing depends on resuming it --
+#     math500's caps are committed -- and a fresh math500 calibration would
+#     have to start from an empty file regardless.
+MEASURE_CAP = {"cot": 40960, "nothink": 2048, "direct": 512}
 
 # THE STOPPING RULE, committed BEFORE the 16384 calibration is read, because a
 # rule written afterwards is a judgement made on the outcome.
