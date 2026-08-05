@@ -75,19 +75,30 @@ all fixed before this script runs and are recorded in the manifest afterwards.
 `--layers` is the one exception and it prints a warning, because an exploratory
 window is not a pre-registered band.
 
-THE LOOP GATE (pre-registered in config.LOOP_GATE) fires between cells,
-not after the whole run: the ablated CoT cell is the expensive one and the
-gate's whole purpose is to stop before paying for it. It compares the
-`unusable` rate -- outcome in {incomplete, unparsed, error} -- against the
-matched intact cell, because cot_intact already sits near 5% and an absolute
-threshold would fire on noise. distinct10 is NOT the signal; see config.py for
-the measurement that disqualified it.
+THE LOOP GATE (pre-registered in config.LOOP_GATE) fires INSIDE the ablated
+CoT cell, after its first gate-n problems: config's decision 24 says to run
+ablated CoT on a few problems and stop before paying for the rest if
+generation has degenerated. It used to fire after the cot_random cell instead
+-- a proxy that never observed ablated generation at all, when "targeted
+ablation degenerates uniquely" is the hypothesis itself -- and a staged
+`--only cot_ablated` resume skipped it entirely, because it was attached to a
+cell that invocation never ran. Attached to the cell it protects, it reads
+records whether they were generated this invocation or resumed from disk. It
+compares the `unusable` rate -- outcome in {incomplete, unparsed, error} --
+against the matched intact cell, because cot_intact already sits near 5% and
+an absolute threshold would fire on noise. distinct10 is NOT the signal; see
+config.py for the measurement that disqualified it. The old between-cells
+check survives as a free secondary tripwire after cot_random: both cells it
+reads are on disk by then, and broad degradation under random directions is
+worth stopping for even though it is not what decision 24 gates.
 
-COST. With config.USE_EXCLUSION True every ablated generation runs a second
-clean forward pass per token, so the two ablated CoT cells cost roughly 2x the
-intact one plus the per-position projection. That number was never measured, so
-`--n 1` exists: it prints per-cell seconds and the extrapolation to the full
-run, which is the input power.py --secs wants.
+COST. With config.USE_EXCLUSION True every J-space-ablated generation runs a
+second clean forward pass per token, so cot_ablated costs roughly 2x the
+intact cell plus the per-position projection. The random cells skip the clean
+pass -- hooks.make_ablation consumes the exclusion set for kind="ablate" only,
+so paying for it there computes a set nothing reads (see exclusion_for). That
+number was never measured, so `--n 1` exists: it prints per-cell seconds and
+the extrapolation to the full run, which is the input power.py --secs wants.
 """
 import argparse
 import json
@@ -102,9 +113,10 @@ import loaders
 from hooks import make_ablation, n_layers, resolve_band
 from loaders import backend_of, load_real, load_tiny, pick_device
 
-# Cheap cells first, and the ablated CoT cell LAST so the loop gate can stop
-# before it. Intact before intervened within a level, because the gate compares
-# against the intact rate.
+# Cheap cells first, and the ablated CoT cell LAST: its own gate stops it
+# after the first gate-n problems, and the cot_random tripwire before it needs
+# that cell complete. Intact before intervened within a level, because the
+# gate compares against the intact rate.
 #
 # NAMES ONLY, and separate from conditions() on purpose: which cells a run will
 # generate has to be known BEFORE the prompts are resolved, because the
@@ -162,6 +174,39 @@ def conditions(dataset: str, levels=None):
     return out
 
 
+def exclusion_for(kind: str | None, use_ex: bool, kx: int) -> int | None:
+    """generate_ablated's exclude_topk for one cell, or None to skip the
+    paired clean pass.
+
+    ONE place, because the decision has two parts that drifted apart once
+    already: whether the pre-registration wants the exclusion rule at all
+    (config.USE_EXCLUSION), and whether this cell's selection can consume it.
+    hooks.make_ablation reads the exclusion set for kind="ablate" only -- the
+    random kinds draw uniformly from all 151,936 unembedding rows, where a
+    draw hitting a clean top-10 token is a ~0.07% event per position -- so the
+    clean pass under "rand_tok" doubled one of the two most expensive cells to
+    compute a set nothing looked at. Skipping it leaves the generated tokens
+    bit-identical: the clean pass runs paused, on its own cache.
+    """
+    return kx if (use_ex and kind == "ablate") else None
+
+
+def gate_index(cond: str, ids, gate, tiny: bool = False,
+               calib: bool = False) -> int | None:
+    """The problem id after which the pre-registered gate must run, or None.
+
+    The id, not the loop position, so the check works identically whether the
+    record was generated this invocation or resumed from disk -- which is what
+    makes the gate `--only`-proof: a staged `--only cot_ablated` resume hits
+    it exactly where a full run does. Attached to cot_ablated because that is
+    the cell decision 24 gates; the ids are generated in sorted order, so the
+    first min(gate_n, n) of them are exactly the pairs gate_check will read.
+    """
+    if cond != "cot_ablated" or tiny or calib or not ids:
+        return None
+    return ids[min(gate["n"], len(ids)) - 1]
+
+
 def resolve_n(dataset: str, n: int | None) -> int:
     """`--n` when given, else the pre-registered config.N_DEFAULT[dataset].
 
@@ -180,7 +225,30 @@ def resolve_n(dataset: str, n: int | None) -> int:
             f"run; commit N_DEFAULT[{dataset!r}] before the real one.") from None
 
 
-def pin_guard(prev, prov, allow_device_change=False, n_done=0, out="the file"):
+def _sample_extension(prev_ds: dict, new_ds: dict, rehash) -> bool:
+    """True when the new sample EXTENDS the pinned one: the same problems,
+    plus more of them.
+
+    config.problem_ids is a shuffle prefix, so problem_ids(100) nests inside
+    problem_ids(150) by construction and config promises the extension is
+    free -- but the pin's content_sha256 is hashed over the sampled ids, so a
+    superset hashes differently and the guard used to refuse the very
+    workflow config prescribes, with no override. Nesting alone is not
+    enough, though: the ids could nest while the split changed underneath
+    them. `rehash` recomputes the content hash over the PINNED ids from the
+    dataset as loaded now, and only a match proves the records on disk denote
+    the same problems they did when written.
+    """
+    old_ids, new_ids = prev_ds.get("ids"), new_ds.get("ids")
+    if not (rehash and old_ids and new_ids):
+        return False
+    if not set(old_ids) < set(new_ids):
+        return False
+    return rehash(old_ids) == prev_ds.get("content_sha256")
+
+
+def pin_guard(prev, prov, allow_device_change=False, n_done=0, out="the file",
+              rehash=None):
     """Reconcile the pin already on disk with this invocation's, or refuse.
 
     Returns the pin dict to write.
@@ -202,6 +270,15 @@ def pin_guard(prev, prov, allow_device_change=False, n_done=0, out="the file"):
                       is the datasets library's private hash and can differ
                       across library versions and machines, which is precisely
                       the situation a resume on a new box is in.
+
+                      ONE content mismatch is legitimate and accepted: an
+                      n-EXTENSION, where the pinned ids nest inside the new
+                      sample and their rows still hash identically (see
+                      _sample_extension). The workflow is to copy the .jsonl
+                      AND its _pin.json to the larger n's run_path, then
+                      resume there -- the filename keeps telling the truth
+                      about n, and nothing already generated is regenerated.
+                      The pin records each extension in `sample_history`.
       hardware        The BACKEND, per loaders.backend_of. bf16 kernels differ
                       between MPS and CUDA, so greedy decoding is deterministic
                       on a backend and not across them.
@@ -218,6 +295,11 @@ def pin_guard(prev, prov, allow_device_change=False, n_done=0, out="the file"):
     """
     keep = dict(prov)
     now = prov["hardware"]
+    # Carried forward on every resume, extension or not: dict(prov) starts
+    # from this invocation's pin, and the history of past extensions lives
+    # only in the file being replaced.
+    if prev.get("sample_history"):
+        keep["sample_history"] = list(prev["sample_history"])
 
     old_rev, new_rev = prev.get("model_revision"), prov.get("model_revision")
     if old_rev and new_rev and old_rev != new_rev:
@@ -235,13 +317,35 @@ def pin_guard(prev, prov, allow_device_change=False, n_done=0, out="the file"):
     for field in ("rows", "content_sha256"):
         old, new = old_ds.get(field), new_ds.get(field)
         if old is not None and new is not None and old != new:
+            if field == "content_sha256" and _sample_extension(old_ds, new_ds,
+                                                               rehash):
+                print(
+                    f"NOTE: extending {out} from n={len(old_ds['ids'])} to "
+                    f"n={len(new_ds['ids'])}. The pinned ids nest inside this "
+                    f"sample and their rows hash identically, so the {n_done} "
+                    f"records on disk denote the same problems. Recorded in "
+                    f"the pin's sample_history.\n"
+                    f"  If a calibration sample was drawn DISJOINT from the "
+                    f"run sample (config.CALIB_SAMPLE), that claim was "
+                    f"verified at the old n -- recompute the overlap and "
+                    f"report it.")
+                keep["sample_history"] = (keep.get("sample_history") or []) + \
+                    [{"n": len(old_ds["ids"]), "content_sha256": old}]
+                continue
+            hint = ""
+            if field == "content_sha256":
+                hint = ("\nAn n-EXTENSION -- the same problems, more of them "
+                        "-- is accepted automatically when the pinned ids "
+                        "nest inside the new sample and still hash the same: "
+                        "copy the .jsonl and its _pin.json to the larger n's "
+                        "run_path and resume there.")
             raise SystemExit(
                 f"refusing to resume {out}:\n"
                 f"  pinned dataset {field}: {old}\n"
                 f"  this invocation:        {new}\n"
                 f"The sample ids in the {n_done} records on disk denote "
                 f"different problems than they would now. Write to a new "
-                f"--out.")
+                f"--out." + hint)
 
     was = prev.get("hardware")
     if not was:
@@ -287,7 +391,7 @@ def pin_guard(prev, prov, allow_device_change=False, n_done=0, out="the file"):
     return keep
 
 
-def write_pin(out, prov, allow_device_change=False, n_done=0):
+def write_pin(out, prov, allow_device_change=False, n_done=0, rehash=None):
     """Reconcile this invocation's pin with the one on disk, and write it.
 
     Returns what was written. Split out of main so the branch that matters can
@@ -301,7 +405,7 @@ def write_pin(out, prov, allow_device_change=False, n_done=0):
     if n_done and os.path.exists(pin_path):
         with open(pin_path) as f:
             prov = pin_guard(json.load(f), prov, allow_device_change,
-                             n_done=n_done, out=out)
+                             n_done=n_done, out=out, rehash=rehash)
     else:
         prov = {**prov, "hardware_history": [prov["hardware"]]}
     with open(pin_path, "w") as f:
@@ -365,6 +469,32 @@ def gate_check(path, cells, gate, n_run=None):
            f"delta {delta * 100:+.0f} pts against a {gate['threshold']:.0%} "
            f"threshold over {len(shared)} problems")
     return delta > gate["threshold"], msg
+
+
+def ablated_gate(path, gate, n_run, n_left):
+    """Decision 24, executed: the gate over the first gate-n cot_ablated
+    problems, against their matched cot_intact records. Returns True when
+    the run must stop before generating the rest of the cell.
+
+    `n_left` is how many cot_ablated problems are not yet on disk -- what
+    firing actually saves. It is printed rather than assumed because the gate
+    also runs on resume: over a completed cell it can no longer prevent
+    anything, and the message must not claim it did.
+    """
+    fired, msg = gate_check(path, ("cot_ablated", "cot_intact"), gate,
+                            n_run=n_run)
+    print(f"  {msg}")
+    if fired:
+        print(f"\nGATE FIRED, as decision 24 pre-registered: ablated CoT has "
+              f"degenerated against\n  its intact baseline. Stopping with "
+              f"{n_left} cot_ablated problem(s) ungenerated;\n  the "
+              f"gate-sample records stay on disk. Revise the band or the "
+              f"cap; do NOT\n  relax the gate having seen this.")
+    elif "deferred" in msg:
+        print("  WARNING: the gate could not run -- cot_intact is not on "
+              "disk for these ids,\n  so cot_ablated proceeds UNGUARDED. "
+              "Generate cot_intact first for a guarded run.")
+    return fired
 
 
 def cap_report(path, dataset):
@@ -910,7 +1040,12 @@ def main(argv=None):
         # of records it would have contaminated -- and so that the pin on disk
         # is only replaced once this invocation is known to be a legitimate
         # continuation of the file it is appending to.
-        prov = write_pin(out, prov, a.allow_device_change, len(done))
+        # `rehash` re-fingerprints an arbitrary id list against the dataset
+        # as loaded NOW -- what lets pin_guard verify that an n-extension's
+        # nested ids still denote the rows they did when pinned.
+        prov = write_pin(out, prov, a.allow_device_change, len(done),
+                         rehash=lambda pinned: scoring.dataset_fingerprint(
+                             ds, pinned)["content_sha256"])
         print(f"pinned revision {prov['model_revision']}   "
               f"content {prov['dataset']['content_sha256']}   "
               f"device {device}")
@@ -928,8 +1063,23 @@ def main(argv=None):
                                else config.cap_for(cond, a.dataset)))
         t_cell = time.time()
         nrec = 0
+        # WHERE decision 24 runs: inside this cell, keyed by problem id
+        # (gate_index), so a staged `--only cot_ablated` resume hits it
+        # exactly where a full run does.
+        gate_at = gate_index(cond, ids_, GATE, tiny=a.tiny, calib=CALIB)
+
+        def gate_now(i, cond=cond, gate_at=gate_at):
+            if i != gate_at:
+                return False
+            left = sum(1 for j in ids_ if j > i and (j, cond) not in done)
+            return ablated_gate(out, GATE, n, left)
+
         for i in ids_:
             if (i, cond) in done:
+                # The gate must see resumed records too, or a warm file
+                # would sail past it.
+                if gate_now(i):
+                    return 3
                 continue
             if a.tiny:
                 enc = {"input_ids": torch.randint(0, 256, (1, 12)).to(device)}
@@ -949,13 +1099,22 @@ def main(argv=None):
                 body = g[0, enc["input_ids"].shape[1]:]
             else:
                 from hooks import generate_ablated
+                # `problem=i`: the random kinds key their draws by problem,
+                # so the control averages over selections instead of
+                # conditioning every problem on one shared pattern.
                 fn = make_ablation(model, K, mode=MODE, gain_scaled=GAIN,
-                                   kind=kind, seed=config.SEED)
+                                   kind=kind, seed=config.SEED, problem=i)
+                # eos deliberately unspecified: generate_ablated falls back
+                # to model.generation_config.eos_token_id, the LIST
+                # [<|im_end|>, <|endoftext|>] that model.generate stops on.
+                # Passing tok.eos_token_id here stopped on <|im_end|> alone,
+                # so a degenerate intervened generation emitting the other
+                # token ran to the cap while its intact partner terminated --
+                # hit_cap and `incomplete` inflated in the intervened cells
+                # only, straight into the gate and the outcome table.
                 g, n_new, iv = generate_ablated(
                     model, enc["input_ids"], list(band), fn, cap,
-                    exclude_topk=KX if USE_EX else None,
-                    eos_token_id=(None if a.tiny
-                                  else tok.eos_token_id))
+                    exclude_topk=exclusion_for(kind, USE_EX, KX))
                 body = g[0, enc["input_ids"].shape[1]:]
                 n_mod = iv.n_modified
             raw = prefill + ("" if a.tiny else
@@ -993,21 +1152,29 @@ def main(argv=None):
             nrec += 1
             print(f"{cond:16} id={i:<5} {n_new:5d} tok "
                   f"{rec['secs']:7.1f}s  mod={n_mod}", flush=True)
+            if gate_now(i):
+                return 3
         secs[cond] = time.time() - t_cell
         counts[cond] = nrec
         if nrec:
             print(f"  {cond}: {nrec} problems in {secs[cond] / 60:.1f} min")
 
-        # Gate between cells, before the most expensive one is paid for.
-        # Never during calibration: there is no ablated cell to gate.
+        # SECONDARY tripwire, not decision 24: random-direction generation
+        # degenerating against intact is broad breakage upstream of the
+        # hypothesis, worth stopping for before cot_ablated starts. The
+        # pre-registered gate is the one inside cot_ablated (ablated_gate),
+        # which observes the cell it protects rather than a proxy for it.
+        # Never during calibration: no intervened cell exists.
         if cond == "cot_random" and not a.tiny and not CALIB:
             fired, msg = gate_check(out, ("cot_random", "cot_intact"), GATE,
                                     n_run=n)
             print(f"  {msg}")
             if fired:
-                print("\nGATE FIRED. Stopping before cot_ablated, as decision "
-                      "24 pre-registered.\n  Revise the band or the cap; do "
-                      "NOT relax the gate having seen this.")
+                print("\nTRIPWIRE FIRED: generation degenerated under RANDOM "
+                      "directions, so the\n  breakage is upstream of the "
+                      "hypothesis. Stopping before cot_ablated. Revise\n  "
+                      "the band or the cap; do NOT relax the check having "
+                      "seen this.")
                 return 3
 
     # Divided by what this invocation ACTUALLY GENERATED, not by n. Dividing by

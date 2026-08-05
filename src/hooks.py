@@ -71,6 +71,7 @@ matmul reduction order underneath the one piece of code the whole result rests
 on. If you later decide to batch, these assertions fail loudly instead of the
 experiment succeeding quietly.
 """
+import hashlib
 import math
 
 import torch
@@ -81,7 +82,7 @@ __all__ = [
     "hook_census", "logit_lens", "LayerHooks", "Capture", "Intervene",
     "Firing", "add_noise", "project_out", "readout_gain", "readout_scores",
     "topk_tokens", "directions_for", "random_directions", "make_ablation",
-    "generate_ablated",
+    "generate_ablated", "draw_seed",
     "BATCH1_MSG", "NOCACHE_MSG",
 ]
 
@@ -650,8 +651,12 @@ def generate_ablated(model, input_ids, layers, fn, max_new_tokens,
     that show dropping it changes what the ablation does.
 
     `exclude_topk=None` skips the clean pass entirely and runs single-pass.
-    That is not a speed knob: it is a different experiment, and the config
-    constant is what decides it.
+    For the "ablate" kind that is not a speed knob -- it is a different
+    experiment, and config.USE_EXCLUSION is what decides it. For the random
+    kinds it is the RIGHT call: make_ablation reads the exclusion set for
+    kind="ablate" only, so a clean pass under "rand_tok" doubles the cell's
+    cost to compute a set nothing consumes. run.exclusion_for is the one
+    place that decision is written.
 
     The clean pass runs with `intervene.paused = True` rather than by removing
     the hooks, so the ablated run's absolute-position accounting is untouched.
@@ -706,8 +711,29 @@ def generate_ablated(model, input_ids, layers, fn, max_new_tokens,
     return seq, len(new), iv
 
 
+def draw_seed(*parts) -> int:
+    """One torch.Generator seed from structured integer parts, via sha256.
+
+    Replaces `seed * 1_000_003 + layer * 1009 + pos + q`, which collided
+    exactly at (layer, pos + 1009) == (layer + 1, pos) -- well inside a CoT
+    trace, so adjacent layers in the band shared their "random" draws at a
+    fixed position offset. Distinct parts must give independent draws, and
+    arithmetic strides only do that while every part stays under its stride.
+
+    sha256 rather than hash(): tuple hashing is only stable within a Python
+    version, and the control must reproduce across the MPS -> CUDA move and
+    across whatever interpreter a later replication runs -- the same reason
+    add_noise generates on CPU. The cost is one short hash per position per
+    layer, noise against the forward pass it accompanies.
+    """
+    h = hashlib.sha256(
+        ",".join(str(int(p)) for p in parts).encode()).digest()
+    return int.from_bytes(h[:4], "little")
+
+
 def make_ablation(model, k: int, mode: str, gain_scaled: bool,
-                  kind: str = "ablate", seed: int = 0, track=None):
+                  kind: str = "ablate", seed: int = 0, problem: int = 0,
+                  track=None):
     """The intervention itself, as an `Intervene` fn -- ONE definition.
 
     The calibration probe, the automatic-task damage floor and the main
@@ -726,6 +752,14 @@ def make_ablation(model, k: int, mode: str, gain_scaled: bool,
     mode        project_out mode, config.PROJECTION_MODE
     gain_scaled config.PROJECT_GAIN_SCALED. No default: both are
                 pre-registration choices, not conveniences.
+    problem     which problem this generation belongs to, and it exists for
+                the random kinds: the draw is keyed by (seed, problem, layer,
+                position), so every problem sees its OWN random directions.
+                Left at the default, the control is conditional on a single
+                pseudo-random pattern shared by every problem in the cell --
+                decorrelated only by accident, where prompt lengths happen to
+                differ -- and one unlucky draw biases the whole control arm
+                rather than averaging out across problems.
     track       optional dict; per-position ||dh||/||h|| is appended under
                 `kind` for the displacement tables.
 
@@ -752,8 +786,8 @@ def make_ablation(model, k: int, mode: str, gain_scaled: bool,
             else:
                 V = random_directions(
                     model, k,
-                    seed=seed * 1_000_003 + firing.layer * 1009
-                         + firing.pos_start + q,
+                    seed=draw_seed(seed, problem, firing.layer,
+                                   firing.pos_start + q),
                     mode="tokens" if kind == "rand_tok" else "gaussian",
                     gain_scaled=gain_scaled)
             hq = h[0, q].float()

@@ -117,6 +117,13 @@ N_DEFAULT = {
     # strict superset and nothing already generated is wasted -- but an
     # extension decided after seeing the interaction is a different experiment
     # and has to be labelled as one.
+    #
+    # HOW TO EXTEND, mechanically: copy the .jsonl AND its _pin.json to the
+    # larger n's run_path, then resume there. run.pin_guard accepts the new
+    # sample when the pinned ids nest inside it and their rows still hash
+    # identically, and records the old n in the pin's sample_history. Note
+    # that the calibration sample's disjoint-from-run claim was verified at
+    # the OLD n -- recompute the overlap and report it.
     "math500": 100,
 
     # The WHOLE dataset, not a sample. 30 problems is what AIME 2024 has, so
@@ -637,6 +644,15 @@ K_OCCUPANCY = 25    # sparse-decomposition occupancy; NOT used for ablation
 # must be re-measured. Cheapness was the only argument for dropping it, and
 # cheapness is not a reason to run a different experiment than the one the
 # hypothesis is about.
+#
+# SCOPE: the rule bites on the ABLATE selection only. The random controls
+# draw uniformly from all 151,936 unembedding rows, where a draw landing on a
+# clean top-10 token is a ~0.07% event per position -- negligible under either
+# reading of the paper -- and hooks.make_ablation consumes the exclusion set
+# for kind="ablate" alone. run.exclusion_for therefore skips the paired clean
+# pass for the rand cells: paying it there doubled one of the two most
+# expensive cells to compute a set nothing read, and skipping it leaves the
+# generated tokens bit-identical.
 USE_EXCLUSION = True
 
 
@@ -705,6 +721,14 @@ PROJECT_GAIN_SCALED = True
 # problems. That is coarse, and it is stated as coarse rather than dressed up:
 # the gate is a tripwire against catastrophe, not a test. GATE_N is separate
 # from the run's n so that raising one does not silently move the other.
+#
+# WHERE IT RUNS: inside the cot_ablated cell, after its first n problems
+# (run.ablated_gate) -- the gate observes the cell it protects. An earlier
+# implementation fired after cot_random instead, a proxy that never saw
+# ablated generation at all when "targeted ablation degenerates uniquely" is
+# the hypothesis itself, and that a staged `--only cot_ablated` resume
+# skipped entirely. The cot_random comparison survives as a secondary
+# tripwire for breakage upstream of the hypothesis.
 LOOP_GATE = {
     "signal": "unusable",     # outcome in {incomplete, unparsed, error}
     "mode": "delta",          # vs the matched intact cell

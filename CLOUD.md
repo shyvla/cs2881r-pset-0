@@ -108,8 +108,9 @@ python run.py --dataset gsm8k --only cot   # or one arm at a time
 ```
 
 Resumable and keyed by `(id, cond)`: re-running appends only what is missing.
-The loop gate stops the run before the most expensive cell if ablated
-generation has degenerated.
+The loop gate runs inside the most expensive cell and stops it after its
+first ~20 problems if ablated generation has degenerated; a free tripwire
+after `cot_random` catches breakage upstream of the hypothesis.
 
 ## 8. Bring it home
 

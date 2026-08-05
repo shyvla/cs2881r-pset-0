@@ -328,8 +328,11 @@ def main(argv=None):
             if ok:
                 correct_ids.append(pid)
         for kind, _ in KINDS:
+            # problem=pid, matching run.py: the random kinds key their draws
+            # by problem, so this probe's controls average over selections
+            # the same way the run's do.
             fn = make_ablation(model, K, mode=CAL_MODE, gain_scaled=CAL_GAIN,
-                               kind=kind, track=ratios)
+                               kind=kind, problem=pid, track=ratios)
             # Step 1 above still MEASURES the overlap -- that measurement is
             # what justified config.USE_EXCLUSION, and would overturn it on a
             # band where the rule bites harder. What changes here is whether

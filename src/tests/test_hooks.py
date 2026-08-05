@@ -20,8 +20,8 @@ from transformers import Qwen3Config, Qwen3ForCausalLM
 import config
 from hooks import (Capture, Firing, Intervene, LayerHooks, add_noise,
                    band_from_depth, decoder_layers, directions_for,
-                   final_norm, generate_ablated, hook_census, logit_lens,
-                   make_ablation,
+                   draw_seed, final_norm, generate_ablated, hook_census,
+                   logit_lens, make_ablation,
                    n_layers, project_out, random_directions, readout_gain,
                    readout_scores, topk_tokens)
 
@@ -533,9 +533,9 @@ def test_exclude_is_sliced_per_firing():
     assert seen[0] == {3: [11, 22], 7: [33]}, seen
 
 
-def _ablate_logits(m, x, layer, exclude, kind="ablate", seed=0):
+def _ablate_logits(m, x, layer, exclude, kind="ablate", seed=0, problem=0):
     fn = make_ablation(m, 10, mode="span", gain_scaled=True, kind=kind,
-                       seed=seed)
+                       seed=seed, problem=problem)
     with Intervene(m, [layer], fn=fn, scope="prefill",
                    exclude=exclude), torch.no_grad():
         return m(x).logits.clone()
@@ -662,6 +662,53 @@ def test_make_ablation_control_is_seed_reproducible():
     assert torch.equal(a, _ablate_logits(m, x, L, {}, kind="rand_tok", seed=5))
     assert not torch.equal(a, _ablate_logits(m, x, L, {}, kind="rand_tok",
                                              seed=6))
+
+
+def test_make_ablation_control_draws_differ_per_problem():
+    """The control must AVERAGE over random selections. Keyed by (seed,
+    layer, position) alone, every problem in a cell saw the same
+    pseudo-random pattern -- decorrelated only by accident, where prompt
+    lengths happened to differ -- so one unlucky draw biased the whole
+    control arm instead of washing out across problems."""
+    m, x, L = tiny_model(), ids(8), 3
+    a = _ablate_logits(m, x, L, {}, kind="rand_tok", problem=0)
+    assert torch.equal(a, _ablate_logits(m, x, L, {}, kind="rand_tok",
+                                         problem=0))
+    assert not torch.equal(a, _ablate_logits(m, x, L, {}, kind="rand_tok",
+                                             problem=1)), \
+        "problems must not share their random draws"
+
+
+def test_draw_seed_is_deterministic_and_kills_the_stride_collision():
+    """The old arithmetic (seed * 1_000_003 + layer * 1009 + pos) collided
+    exactly at (layer, pos + 1009) == (layer + 1, pos) -- well inside a CoT
+    trace, so adjacent band layers shared their 'random' draws at a fixed
+    position offset."""
+    assert draw_seed(0, 0, 14, 1509) == draw_seed(0, 0, 14, 1509)
+    assert draw_seed(0, 0, 14, 1009) != draw_seed(0, 0, 15, 0), \
+        "the pair the old stride arithmetic collided on"
+    s = draw_seed(1, 2, 3, 4)
+    assert isinstance(s, int) and 0 <= s < 2 ** 32
+
+
+def test_generate_ablated_default_stop_set_is_the_models_own():
+    """run.py leaves eos unspecified so the intervened cells stop on the SAME
+    set model.generate uses. Qwen3's generation_config carries a LIST
+    ([<|im_end|>, <|endoftext|>]) while tok.eos_token_id is the single first
+    entry -- passing the latter let a degenerate intervened generation run
+    through <|endoftext|> to the cap while its intact partner terminated,
+    inflating hit_cap and `incomplete` in the intervened cells only."""
+    m, x = tiny_model(), ids(6)
+    with torch.no_grad():
+        first = int(m(x).logits[0, -1].argmax())
+    saved = m.generation_config.eos_token_id
+    try:
+        m.generation_config.eos_token_id = [9999, first]   # a list, as Qwen3
+        _, n, _ = generate_ablated(m, x, [2], lambda h, f: None, 20)
+        assert n == 1, f"the list's LATER entries must stop generation; " \
+                       f"ran {n} tokens"
+    finally:
+        m.generation_config.eos_token_id = saved
 
 
 def test_make_ablation_rejects_unknown_kind():

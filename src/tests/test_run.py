@@ -137,12 +137,12 @@ def test_resolve_n_exits_rather_than_borrowing_gsm8ks_n():
 
 # ==================================================== the loop gate
 
-def _gate_file(path, n_pairs, bad_abl, bad_base):
-    """A generations file with `n_pairs` matched cot_random/cot_intact records,
-    the first `bad_*` of each unusable (an unclosed <think>, which score()
-    grades `incomplete`)."""
+def _gate_file(path, n_pairs, bad_abl, bad_base, abl_cond="cot_random"):
+    """A generations file with `n_pairs` matched intervened/cot_intact
+    records, the first `bad_*` of each unusable (an unclosed <think>, which
+    score() grades `incomplete`)."""
     with open(path, "w") as f:
-        for cond, n_bad in (("cot_random", bad_abl), ("cot_intact", bad_base)):
+        for cond, n_bad in ((abl_cond, bad_abl), ("cot_intact", bad_base)):
             for i in range(n_pairs):
                 raw = ("<think>looping and looping" if i < n_bad
                        else "<think>ok</think>\\boxed{7}")
@@ -197,6 +197,52 @@ def test_gate_defers_when_the_cells_are_not_both_generated():
         _gate_file(p, 20, 0, 0)
         fired, msg = run.gate_check(p, ("cot_ablated", "cot_intact"), gate, 20)
         assert not fired and "deferred" in msg, msg
+
+
+def test_the_decision_24_gate_reads_the_ablated_cell_itself():
+    """Decision 24 says to run ablated CoT on a few problems and stop before
+    paying for the rest. The gate used to fire after cot_random instead -- a
+    proxy that never observed ablated generation, when 'targeted ablation
+    degenerates uniquely' is the hypothesis itself: the one case it existed
+    for was invisible to it."""
+    gate = dict(config.LOOP_GATE)
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "g.jsonl")
+        # 5/20 ablated unusable vs 0 intact = +25 pts against 15
+        _gate_file(p, 20, 5, 0, abl_cond="cot_ablated")
+        assert run.ablated_gate(p, gate, 20, n_left=130)
+        _gate_file(p, 20, 2, 0, abl_cond="cot_ablated")   # +10 pts, under it
+        assert not run.ablated_gate(p, gate, 20, n_left=130)
+
+
+def test_gate_index_is_keyed_by_id_so_a_staged_resume_cannot_skip_it():
+    """The gate is attached to the cell it protects, by problem id: a
+    `--only cot_ablated` resume over a warm file hits it exactly where a
+    full run does. It used to hang off the end of the cot_random cell, which
+    that invocation never ran."""
+    ids_ = list(range(0, 300, 2))            # ids are not loop positions
+    gate = dict(config.LOOP_GATE)
+    assert run.gate_index("cot_ablated", ids_, gate) == ids_[gate["n"] - 1]
+    # a run smaller than the gate's n gates after its last problem
+    assert run.gate_index("cot_ablated", ids_[:7], gate) == ids_[6]
+    # no other cell, and never in tiny or calibration mode
+    for cond in ("cot_random", "cot_intact", "direct_ablated"):
+        assert run.gate_index(cond, ids_, gate) is None
+    assert run.gate_index("cot_ablated", ids_, gate, tiny=True) is None
+    assert run.gate_index("cot_ablated", ids_, gate, calib=True) is None
+    assert run.gate_index("cot_ablated", [], gate) is None
+
+
+def test_the_clean_pass_is_paid_only_where_its_output_is_consumed():
+    """hooks.make_ablation reads the exclusion set for kind='ablate' alone;
+    the random kinds draw uniformly from the whole vocabulary, where the
+    exemption is a ~0.07% event per position. Paying the paired clean pass
+    there doubled one of the two most expensive cells to compute a set
+    nothing looked at."""
+    assert run.exclusion_for("ablate", True, 10) == 10
+    assert run.exclusion_for("rand_tok", True, 10) is None
+    assert run.exclusion_for("rand_gauss", True, 10) is None
+    assert run.exclusion_for("ablate", False, 10) is None
 
 
 # ==================================== the calibration / run-data boundary
@@ -665,6 +711,75 @@ def test_the_datasets_private_fingerprint_is_not_compared():
     b = _pin()
     b["dataset"]["fingerprint"] = "cloud"
     run.pin_guard(a, b, n_done=50)
+
+
+def test_an_n_extension_over_the_same_problems_is_accepted():
+    """config.problem_ids is a shuffle prefix, so a larger sample nests the
+    smaller one by construction and config promises the extension is free.
+    The guard used to refuse the very workflow config prescribes:
+    content_sha256 is hashed over the sampled ids, and a superset hashes
+    differently. Accepted ONLY when the pinned ids nest inside the new sample
+    and still hash the same against the dataset as loaded now."""
+    old = _pin(sha="aaaa")
+    old["dataset"]["ids"] = [1, 5, 9]
+    new = _pin(sha="bbbb")
+    new["dataset"]["ids"] = [1, 3, 5, 7, 9]
+    got = run.pin_guard(old, new, n_done=18,
+                        rehash=lambda pinned: "aaaa" if pinned == [1, 5, 9]
+                        else "wrong-ids-rehashed")
+    assert got["dataset"]["content_sha256"] == "bbbb"
+    assert got["sample_history"] == [{"n": 3, "content_sha256": "aaaa"}]
+
+
+def test_an_extension_whose_shared_rows_changed_is_refused():
+    """Nesting ids are not enough: the split can change underneath them, and
+    then the same ids denote different problems."""
+    old = _pin(sha="aaaa")
+    old["dataset"]["ids"] = [1, 5, 9]
+    new = _pin(sha="bbbb")
+    new["dataset"]["ids"] = [1, 3, 5, 7, 9]
+    try:
+        run.pin_guard(old, new, n_done=18, rehash=lambda pinned: "XXXX")
+    except SystemExit as e:
+        assert "content_sha256" in str(e), e
+        return
+    raise AssertionError("changed rows under nested ids must refuse")
+
+
+def test_a_non_nesting_sample_is_refused_even_when_the_old_rows_match():
+    old = _pin(sha="aaaa")
+    old["dataset"]["ids"] = [1, 5, 999]
+    new = _pin(sha="bbbb")
+    new["dataset"]["ids"] = [1, 3, 5, 7, 9]
+    try:
+        run.pin_guard(old, new, n_done=18, rehash=lambda pinned: "aaaa")
+    except SystemExit:
+        return
+    raise AssertionError("a non-nested sample is a different sample, "
+                         "not an extension")
+
+
+def test_without_rehash_a_content_change_still_refuses():
+    """No way to verify the pinned rows means no way to call it an
+    extension."""
+    old = _pin(sha="aaaa")
+    old["dataset"]["ids"] = [1, 5]
+    new = _pin(sha="bbbb")
+    new["dataset"]["ids"] = [1, 3, 5]
+    try:
+        run.pin_guard(old, new, n_done=18)
+    except SystemExit:
+        return
+    raise AssertionError("without rehash the nesting claim is unverifiable")
+
+
+def test_sample_history_survives_an_ordinary_resume():
+    """The record of past extensions lives only in the pin being replaced;
+    a plain same-sample resume must carry it forward, not drop it."""
+    old = _pin()
+    old["sample_history"] = [{"n": 3, "content_sha256": "x"}]
+    got = run.pin_guard(old, _pin(), n_done=10)
+    assert got["sample_history"] == [{"n": 3, "content_sha256": "x"}]
 
 
 def test_a_pin_beside_no_records_is_simply_replaced():

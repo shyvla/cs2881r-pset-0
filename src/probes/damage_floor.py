@@ -147,7 +147,10 @@ def run_task(model, tok, task, items, band, K, mode, gain, skip_sink,
             exclude = {p: ct[p].tolist() for p in range(ct.shape[0])}
 
         for kind, _ in KINDS:
-            fn = make_ablation(model, K, mode=mode, gain_scaled=gain, kind=kind)
+            # problem=pid, matching run.py: per-problem draws for the random
+            # kinds, so the floor's controls are the run's controls.
+            fn = make_ablation(model, K, mode=mode, gain_scaled=gain,
+                               kind=kind, problem=pid)
             pos = (set(range(1, enc["input_ids"].shape[1]))
                    if skip_sink else None)
             with Intervene(model, list(band), fn=fn, scope="prefill",
