@@ -68,7 +68,8 @@ the measurement or the argument behind each number, including the ones we got wr
 ## Results so far
 
 Full transcripts: [`src/data_analysis.md`](src/data_analysis.md). Figures:
-[`figures/`](figures/).
+[`figures/`](figures/). Raw generations: [`src/runs/final/`](src/runs/final/) — the
+canonical merged run files every number below is computed from.
 
 | dataset | n | CoT intact / ablated / random | Direct intact / ablated / random | selectivity (CoT arm) | interaction (ablation) | interaction (random control) |
 |---|---|---|---|---|---|---|
@@ -85,9 +86,7 @@ Accuracies in %, contrasts in percentage points with 95% paired-bootstrap CIs.
   direct) with a CI spanning zero. The random control is also ~0, so this is a null rather
   than a mess.
 * **MATH-500's `cot_ablated` cell was generated and then lost.** All 150 problems ran to
-  completion — 707 minutes of H100 time, ~283 s/problem — and I then destroyed the records
-  by accident before they were merged into `runs/math500_n150_light.jsonl`. Stupid, and
-  entirely my own doing: nothing about the pipeline or the gate is implicated. The cell is
+  completion. I then managed to stupidly lose the the data from the runs. The cell is
   being regenerated, and the records plus the updated analysis, table row and figures
   **will be in this repo by noon on Thursday 6 August 2026**. Until then MATH-500 stands at
   5 of 6 cells and has no ablation interaction.
@@ -99,21 +98,6 @@ Accuracies in %, contrasts in percentage points with 95% paired-bootstrap CIs.
 
   <img src="figures/math500_cot_ablated_run_log.png" width="400"
        alt="Terminal log of the completed MATH-500 cot_ablated run">
-
-  Tail of that log:
-
-  ```
-  cot_ablated      id=497   12259 tok   680.5s  mod=73902
-    cot_ablated: 150 problems in 707.0 min
-
-  per-generation seconds
-    cot_ablated        282.8 s  x150  generations
-    TOTAL              282.8 s/problem   -> 11.8 h at n=150
-  ```
-
-  The per-problem lines also corroborate the disclosed censoring: several problems
-  (ids 400, 416, 439, 477, 490, 491, 486) terminate at exactly `16384 tok`, i.e. on
-  MATH-500's committed CoT cap.
 
   </details>
 
@@ -173,9 +157,9 @@ provenance — `analyze.py` reads the split length back out of it.
 
 | path | what |
 |---|---|
-| `runs/{gsm8k_n150,math500_n150,aime24_n30}_light.jsonl` | the canonical merged run files. Every number above comes from these. |
+| `runs/final/{gsm8k_n150,math500_n150,aime24_n30}_light.jsonl` (+ `_pin.json`) | **the final, canonical merged run files — every number in the report and the table above is computed from these.** `gsm8k_n150` and `math500_n150` are also duplicated at `runs/<name>.jsonl` for convenience (byte-identical); `aime24_n30` lives only under `final/`. If you only clone one directory to check the results, clone this one. |
 | `runs/calib_{math500_n25,aime24_n10}.jsonl` | cap calibrations. A **separate namespace** on purpose: intact cells only, generated at `config.MEASURE_CAP` rather than at a committed cap, stamped `calibration: true`, and `analyze.py` refuses to read them as run data. |
-| `runs/incoming/`, `runs/saved_runs/`, `runs/final/` | the per-pod staged files exactly as they came off the rented GPUs, kept so `merge_runs.py`'s inputs stay auditable after the merge. |
+| `runs/incoming/`, `runs/saved_runs/` | the per-pod staged files exactly as they came off the rented GPUs, kept so `merge_runs.py`'s inputs stay auditable after the merge into `runs/final/`. |
 | `runs/archive/` | superseded artifacts, including the n=20 pilot and runs made under the old `random.sample` problem sampler. See `runs/archive/README.md`. Never pool these with the above. |
 
 One generations record:
