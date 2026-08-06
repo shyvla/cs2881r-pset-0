@@ -288,7 +288,7 @@ specific to transformers 5.14.1, and `math-verify`'s own defaults are length-bia
 
 ---
 
-## Results so far
+## Results
 
 Full transcripts: [`src/data_analysis.md`](src/data_analysis.md). Figures:
 [`figures/`](figures/). Raw generations: [`src/runs/final/`](src/runs/final/) — the
@@ -297,37 +297,35 @@ canonical merged run files every number below is computed from.
 | dataset | n | CoT intact / ablated / random | Direct intact / ablated / random | selectivity (CoT arm) | interaction (ablation) | interaction (random control) |
 |---|---|---|---|---|---|---|
 | GSM8K | 150 | 80.7 / 74.7 / 76.7 | 27.3 / 24.7 / 24.7 | +2.0 [−3.3, +7.3] | **−3.3 [−10.7, +4.0]** | −1.3 [−7.3, +4.7] |
-| MATH-500 | 150 (level-balanced) | 94.0 / — / 96.0 | 34.0 / 30.7 / 28.7 | — | *regenerating, see below* | **+7.3 [+2.7, +12.7]**, p=0.003 |
+| MATH-500 | 150 (level-balanced) | 94.0 / 88.0 / 96.0 | 34.0 / 30.7 / 28.7 | **+8.0 [+3.3, +13.3]**, p=0.001 | **−2.7 [−10.0, +4.7]** | **+7.3 [+2.7, +12.7]**, p=0.003 |
 | AIME 2024 | 30 | 66.7 / 55.0 (n=20) / 73.3 | 0.0 / 0.0 / 0.0 | +20.0 [0.0, +40.0] | −20.0 [−40.0, +0.0] | 0.0 [−15.0, +15.0] |
 
 Accuracies in %, contrasts in percentage points with 95% paired-bootstrap CIs.
 
 **Read this before reading the table.**
 
-* **GSM8K is the one complete, clean result, and it is a null.** No selectivity in either
-  arm, and the interaction points the *wrong way* (ablation cost CoT slightly more than
-  direct) with a CI spanning zero. The random control is also ~0, so this is a null rather
-  than a mess.
-* **MATH-500's `cot_ablated` cell was generated and then lost.** All 150 problems ran to
-  completion. I then managed to stupidly lose the data from the runs. The cell is
-  being regenerated, and the records plus the updated analysis, table row and figures
-  **will be in this repo by noon on Thursday 6 August 2026**. Until then MATH-500 stands at
-  5 of 6 cells and has no ablation interaction.
-
-  <details>
-  <summary>Proof the run completed (terminal log, 2026-08-05 23:34)</summary>
-
-  <br>
-
-  <img src="figures/math500_cot_ablated_run_log.png" width="400"
-       alt="Terminal log of the completed MATH-500 cot_ablated run">
-
-  </details>
-
-* **MATH-500's random-control interaction is significantly non-zero** — the quantity that
-  is supposed to be ~0 is not — which on its own says the direct arm degrades under *any*
-  ten removed directions on this dataset. The regenerated ablation interaction cannot be
-  read without that beside it, and must not be read against zero.
+* **H1 — the substitution hypothesis — is not supported on any of the three datasets.** The
+  interaction is the number the experiment was built to produce, and it comes out −3.3, −2.7
+  and −20.0: null in every case, and *negative* in every case, meaning ablation cost the CoT
+  arm slightly more than the direct arm rather than less. Nothing here says written reasoning
+  protects against removing internal reasoning.
+* **MATH-500 does show selectivity — but in the CoT arm, which is the arm H1 predicted would
+  be protected.** +8.0 pts, CI [+3.3, +13.3], p=0.001: the only interval in this study that
+  excludes zero. Removing the top-10 J-lens directions costs 8 points more than removing ten
+  random unembedding rows, so *which* directions are removed demonstrably matters. That is a
+  real finding about the selection, and it is not the finding H1 asked for.
+* **On MATH-500 the control interaction is larger and better-resolved than the ablation
+  interaction** (+7.3, p=0.003 against −2.7, p=0.493). The pre-registration's rule is that a
+  control interaction which is not ~0 means broad degradation rather than a J-space effect,
+  and to read the two lines together or neither. Here the *random* directions produce the
+  interaction pattern H1 predicted while the *targeted* ones do not, which is the reverse of
+  the required evidence: on the direct arm, `direct_random` (28.7) actually scores *below*
+  `direct_ablated` (30.7).
+* **The CoT-arm selectivity is a termination effect, not a wrong-answer effect** — see
+  [below](#is-the-cot-selectivity-reasoning-or-truncation). This is the caveat that decides
+  how much the +8.0 is worth, and it is not favourable.
+* **GSM8K is a clean null.** No selectivity in either arm, an interaction spanning zero, and
+  a control interaction also at ~0 — so unlike MATH-500 this is a null rather than a mess.
 * **AIME 2024's `cot_ablated` cell is 20 of 30 problems because the pre-registered
   degeneration gate fired and stopped it**: 40% unusable against `cot_intact`'s 5%, a
   +35pt delta against a 15% threshold, with 8 cap hits at 32768 and 6 of those ending in
@@ -341,6 +339,53 @@ Accuracies in %, contrasts in percentage points with 95% paired-bootstrap CIs.
 
 See [Disclosures](#disclosures) for the rest.
 
+### Is the CoT selectivity reasoning, or truncation?
+
+The +8.0 on MATH-500 is 12 problems: `cot_ablated` gets 132 right where `cot_random` gets 144.
+But the ablated cell does not get those 12 *wrong* — it fails to finish them. Outcome
+composition for the three CoT cells, from the same `analyze.py` runs:
+
+| dataset | cell | hit cap | `incomplete` | `incorrect` | CoT selectivity |
+|---|---|---|---|---|---|
+| GSM8K (cap 3072) | `cot_intact` | 27 | 24 | 5 | |
+| | `cot_random` | 33 | 28 | 7 | |
+| | `cot_ablated` | 34 | 30 | 8 | +2.0, null |
+| MATH-500 (cap 16384) | `cot_intact` | 7 | 6 | 3 | |
+| | `cot_random` | 3 | 3 | 3 | |
+| | `cot_ablated` | **17** | **17** | **1** | **+8.0, p=0.001** |
+| AIME (cap 32768) | `cot_intact` | 5 | 5 | 5 | |
+| | `cot_random` | 2 | 1 | 7 | |
+| | `cot_ablated` | **8 of 20** | **8** | **1** | +20.0, n=20 |
+
+Two things fall out, and they point the same way:
+
+1. **Where the ablated cell's non-termination rate is not differential, there is no
+   selectivity.** On GSM8K all three CoT cells hit the cap at roughly the same rate (27/33/34)
+   and selectivity is +2.0 with a CI through zero. On MATH-500 the ablated cell hits it 17
+   times against the control's 3, and on AIME 40% against 3% — and those are exactly the two
+   datasets with large positive selectivity.
+2. **When the ablated model does finish, its answers are no worse.** `cot_ablated` has *fewer*
+   `incorrect` than either comparison cell on MATH-500 (1 vs 3 and 3) and on AIME (1 vs 5 and
+   7). So the ablation is not making the model reason badly; it is making it fail to stop.
+
+The headline scoring counts `incomplete` as wrong, which is the pre-registered choice and the
+conservative one for a *degradation* claim — but it means a cap that binds differentially
+converts verbosity into wrongness, which is precisely the differential bias
+`config.CAPS["math500"]` warns about, at a cap that comment already documents as a budget cap
+which censored 15% of the hard tail when it was measured. So a real part of the +8.0 is the
+cap doing the work.
+
+The pre-registration fixes the check that would separate these: a secondary analysis
+restricting to clean terminations. **`analyze.py` does not implement it yet** — there is no
+flag for it — so the honest statement is that the CoT-arm selectivity on MATH-500 is a robust
+*generation-degeneration* effect and an unresolved *reasoning* effect. That check, and the
+observed-power re-run at the measured accuracies, are the two things this analysis still owes.
+
+Note also that MATH-500's degeneration is invisible to the loop gate: the gate reads the first
+20 problems of the ablated cell, where the unusable rate was 0/20 against `cot_intact`'s 0/20.
+The non-termination is concentrated later in the sample, so the cell ran to completion legitimately —
+the gate did not pass it by being blinded, it passed because there was nothing to see in its window.
+
 ---
 
 ## Repository layout
@@ -350,7 +395,7 @@ report.pdf                the write-up — the deliverable
 report.docx               its source document, generated by make_report.js (not hand-edited)
 make_report.js            builds report.docx (Node + the `docx` package)
 CLOUD.md                  renting a GPU: install, cache, verify-before-you-pay, device rules
-figures/                  fig1_accuracy.png, fig2_contrasts.png, and the lost-run log screenshot
+figures/                  fig1_accuracy.png, fig2_contrasts.png
 requirements.txt          exact pins; two of them are load-bearing, see the comments
 src/
   config.py               THE PRE-REGISTRATION. Every fixed number, with its reasoning.
@@ -383,7 +428,8 @@ provenance — `analyze.py` reads the split length back out of it.
 
 | path | what |
 |---|---|
-| `runs/final/{gsm8k_n150,math500_n150,aime24_n30}_light.jsonl` (+ `_pin.json`) | **the final, canonical merged run files — every number in the report and the table above is computed from these.** `gsm8k_n150` and `math500_n150` are also duplicated at `runs/<name>.jsonl` for convenience (byte-identical); `aime24_n30` lives only under `final/`. If you only clone one directory to check the results, clone this one. |
+| `runs/final/{gsm8k_n150,math500_n150,aime24_n30}_light.jsonl` (+ `_pin.json`) | **the final, canonical merged run files — every number in the report and the table above is computed from these.** If you only look at one directory to check the results, look at this one. |
+| `runs/{gsm8k_n150,math500_n150}_light.jsonl` | working copies at the path `scoring.run_path` builds, currently byte-identical to `final/`, which is what lets `analyze.py --dataset gsm8k` work without `--file`. **`final/` is authoritative if they ever disagree** — these are the files a resume or a merge writes to, and one of them has already been clobbered back to an earlier state once. `aime24_n30` has no working copy, so it always needs `--file`. |
 | `runs/calib_{math500_n25,aime24_n10}.jsonl` | cap calibrations. A **separate namespace** on purpose: intact cells only, generated at `config.MEASURE_CAP` rather than at a committed cap, stamped `calibration: true`, and `analyze.py` refuses to read them as run data. |
 | `runs/incoming/`, `runs/saved_runs/` | the per-pod staged files exactly as they came off the rented GPUs, kept so `merge_runs.py`'s inputs stay auditable after the merge into `runs/final/`. |
 
@@ -456,15 +502,21 @@ python analyze.py --dataset aime24 --file runs/final/aime24_n30_light.jsonl
 ```
 
 With no `--file`, `analyze.py` looks for `scoring.run_path` — `runs/<dataset>_n<n>_<band>.jsonl`.
-GSM8K and MATH-500 sit there; **AIME lives only under `runs/final/`, so it needs the explicit
-`--file`** (the plain form raises `FileNotFoundError`). Passing `--file runs/final/...` for all
-three is the safest habit, since `runs/final/` is the canonical copy:
+GSM8K and MATH-500 have working copies there; **AIME has none, so it needs the explicit
+`--file`** (the plain form raises `FileNotFoundError`). Reading all three from `runs/final/` is
+the safest habit, since that is the authoritative copy:
 
 ```bash
 for d in gsm8k_n150 math500_n150 aime24_n30; do
   python analyze.py --file "runs/final/${d}_light.jsonl" --dataset "${d%%_*}"
 done
 ```
+
+**Check the `n` column before trusting a report.** A partial or clobbered generations file
+analyses perfectly happily — it just reports fewer problems — so a silently truncated file
+looks like a result rather than an error. Every cell should read n=150 for GSM8K and MATH-500,
+and n=30 for AIME except `cot_ablated` at 20. The `cells present:` line at the top is the fast
+check: six cells, or something is missing.
 
 Per dataset that prints: per-cell accuracy and outcome composition
 (`correct`/`incorrect`/`incomplete`/`unparsed`/`error`, plus how many answers the markdown
@@ -593,7 +645,7 @@ estimated. One card per column-worth of work; the runs were spread over an RTX 4
 | dataset | `cot_intact` | `cot_random` | `cot_ablated` | all three `direct` cells | total |
 |---|---|---|---|---|---|
 | GSM8K (n=150) | 1.25 h | 1.55 h | 7.14 h | 0.04 h | **9.99 h** |
-| MATH-500 (n=150) | 4.43 h | 4.80 h | *lost, ~11.8 h* | 0.05 h | **9.28 h** + the lost cell |
+| MATH-500 (n=150) | 4.43 h | 4.80 h | 11.81 h | 0.05 h | **21.09 h** |
 | AIME 2024 (n=30) | 2.50 h | 3.06 h | 4.82 h (n=20) + 3.1 h (ids 20–29, 2 pods) | 0.02 h | **10.40 h** |
 
 Two things follow, and both are why the pipeline is shaped the way it is. **The CoT arm is
@@ -661,21 +713,23 @@ reasoning, in the file named.
   published split-weighted MATH-500 numbers.
 * **MATH-500's CoT cap (16384) is a budget cap at the ceiling it was measured at**, not a
   cleared tail: the re-measurement still censored 15% of the hard-end sample, exactly on
-  the pre-committed stopping-rule boundary, so we stopped rather than doubling again. 7 of
-  150 intact CoT generations are `incomplete` at that cap.
+  the pre-committed stopping-rule boundary, so we stopped rather than doubling again. It
+  binds **differentially** in the run — `incomplete` is 17/150 in `cot_ablated` against 6/150
+  intact and 3/150 random — and that asymmetry, not degraded reasoning, is what the CoT-arm
+  selectivity is mostly measuring. See
+  [Is the CoT selectivity reasoning, or truncation?](#is-the-cot-selectivity-reasoning-or-truncation).
+* **The pre-registered clean-termination sensitivity analysis has not been run.** `analyze.py`
+  reports only the headline scoring, which counts `incomplete` as wrong; the secondary analysis
+  restricted to clean terminations — the one that would separate degeneration from bad
+  reasoning on MATH-500 — is not implemented. Nor is the observed-power re-run at the measured
+  accuracies (`analysis.observed_rho`). Both are owed.
 * **AIME 2024's caps were committed without any calibration.** 32768 is a budget ceiling
   bounded by the checkpoint's own `max_position_embeddings` (40960), not a measured tail,
   and the `incomplete` rate at it was unknowable in advance — it came out at 8 of the 20
   `cot_ablated` generations.
 * **AIME's `cot_ablated` cell is gate-stopped at 20/30**, as above.
-* **MATH-500's `cot_ablated` records were lost after a completed run** and are being
-  regenerated; due in this repo by noon on Thursday 6 August 2026. See
-  [Results so far](#results-so-far) for the log of the lost run. This is operator error, not
-  a pipeline or protocol failure, and the regenerated cell is the same pre-registered
-  condition at the same committed cap — but it *was* generated after the other five cells'
-  results were known, which is worth stating even though nothing about the cell is chosen
-  at run time.
-* **MATH-500's random-control interaction is significantly non-zero** (+7.3 pts, p=0.003),
+* **MATH-500's random-control interaction is significantly non-zero** (+7.3 pts, p=0.003) and
+  better-resolved than the ablation interaction it is supposed to be the sanity check for,
   which is the signature of broad degradation rather than a J-space effect.
 * **One deliberate deviation from a literal reading of the paper**: the removed direction is
   gain-scaled (`W_U[t] * g`, not the bare `W_U[t]`), because the J-lens readout score lies

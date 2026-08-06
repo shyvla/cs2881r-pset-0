@@ -29,7 +29,7 @@ DATA = {
         "Direct": {"intact": (27.3, 150), "ablated": (24.7, 150), "random": (24.7, 150)},
     },
     "MATH-500 (n=150, level-balanced)": {
-        "CoT":    {"intact": (94.0, 150), "ablated": None, "random": (96.0, 150)},
+        "CoT":    {"intact": (94.0, 150), "ablated": (88.0, 150), "random": (96.0, 150)},
         "Direct": {"intact": (34.0, 150), "ablated": (30.7, 150), "random": (28.7, 150)},
     },
     "AIME 2024 (n=30)": {
@@ -49,10 +49,10 @@ CONTRASTS = {
         ("Interaction (ablation)",     -3.3, -10.7,  4.0, C_INTACT),
         ("Interaction (random ctrl)",  -1.3,  -7.3,  4.7, C_RANDOM),
     ],
-    # CoT-arm selectivity and the ablation interaction await the re-run
-    # cot_ablated cell; only the estimable contrasts are shown.
     "MATH-500": [
+        ("Selectivity, CoT arm",        8.0,   3.3, 13.3, C_ABLATED),
         ("Selectivity, direct arm",    -2.0,  -6.7,  2.7, C_ABLATED),
+        ("Interaction (ablation)",     -2.7, -10.0,  4.7, C_INTACT),
         ("Interaction (random ctrl)",   7.3,   2.7, 12.7, C_RANDOM),
     ],
     "AIME 2024": [
