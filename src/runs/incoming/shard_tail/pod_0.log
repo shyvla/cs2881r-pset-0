@@ -1,0 +1,37 @@
+loading Qwen/Qwen3-4B @ 1cfa9a720891 onto cuda
+  HF_HOME=/workspace/.hf   HF_HUB_OFFLINE=0
+  cached at /workspace/.hf/hub/models--Qwen--Qwen3-4B/snapshots/1cfa9a7208912126459214e8b04321603b3df60c -- loading should take seconds
+  No further output until the weights land.
+Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:  19%|█▉        | 75/398 [00:00<00:00, 686.93it/s]Loading weights:  36%|███▌      | 144/398 [00:00<00:00, 636.87it/s]Loading weights:  52%|█████▏    | 208/398 [00:00<00:00, 621.86it/s]Loading weights:  68%|██████▊   | 271/398 [00:00<00:00, 596.46it/s]Loading weights:  84%|████████▎ | 333/398 [00:00<00:00, 600.84it/s]Loading weights: 100%|██████████| 398/398 [00:00<00:00, 619.29it/s]
+band=light 14-19 (width 6)   k=10   projection=each/gain=True
+exclusion=ON top-10   gate={'signal': 'unusable', 'mode': 'delta', 'threshold': 0.15, 'n': 20}
+n=30   cells=['cot_ablated']   out=/workspace/cs2881r-pset-0/src/runs/incoming/shard_tail/shard_0.jsonl
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+dataset=aime24 rows=30 question='problem'
+resuming: 20 records on disk
+WARNING: --allow-unguarded -- cot_ablated generates UNGUARDED, with 20/20 of its gate pairs absent, so decision 24 cannot run. The report must disclose this.
+pinned revision 1cfa9a7208912126459214e8b04321603b3df60c   content 6058e47db5e74d7d   device cuda
+restricted to ['cot_ablated'] -- the interaction needs all six, so this is a
+staged run, not a smaller experiment. Resume appends the rest.
+NOTE: --shard 0/2 on cot_ablated -- decision 24's gate is an early
+  stop, and a shard pre-commits to generating its slice. The gate below can
+  REPORT but not prevent, and the report must disclose that this cell was
+  not gate-stopped.
+  shard 0/2: 5 of 10 pending cot_ablated -> [20, 22, 24, 26, 28]
+  gate deferred: 0/20 pairs scored
+  WARNING: the gate could not run -- cot_intact is not on disk for these ids,
+  so cot_ablated proceeds UNGUARDED. Generate cot_intact first for a guarded run.
+[W806 02:14:45.830922883 CUDACachingAllocator.cpp:3933] memory allocation failed with OOM on device 0 while trying to allocate 50331648 bytes (free: 23592960, total: 85028372480).
+[W806 02:21:01.651694723 CUDACachingAllocator.cpp:3933] memory allocation failed with OOM on device 0 while trying to allocate 67108864 bytes (free: 67633152, total: 85028372480).
+cot_ablated      id=20    32768 tok  1515.0s  mod=197532
+cot_ablated      id=22    16841 tok   784.4s  mod=101544
+cot_ablated      id=24     6454 tok   303.0s  mod=39624
+cot_ablated      id=26     7703 tok   358.3s  mod=46626
+cot_ablated      id=28    32768 tok  1544.2s  mod=199008
+  cot_ablated: 5 problems in 75.1 min
+
+per-generation seconds
+   cot_ablated         901.0 s  x5    generations
+   TOTAL               901.0 s/problem   -> 7.5 h at n=30
+
+next:  python power.py <accuracies> --rho <measured> --secs 901
