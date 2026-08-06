@@ -1,4 +1,4 @@
-# Does removing the workspace hurt *internal* reasoning more than *externalised* reasoning?
+# CS 2881R Homework Zero
 
 CS 2881R Homework Zero — [assignment](https://boazbk.github.io/mltheoryseminar/hw0-2026/), on
 [*Verbalizable Representations Form a Global Workspace in Language Models*](https://transformer-circuits.pub/2026/workspace/index.html)
@@ -153,8 +153,7 @@ src/
   power.py                how many problems per cell — run BEFORE spending GPU hours
   merge_runs.py           merge staged per-pod files into one file, refusing mismatches
   make_figures.py         the two report figures
-  verify_shard_plan.py    GPU-free pre-flight for shard_ablated_tail.sh
-  shard_ablated_tail.sh   completing aime24's stopped cell across two cards, and its cost
+  shard_ablated_tail.sh   code to complete aime24's stopped cell across two cards
   data_analysis.md        analyze.py transcripts the figures and the report are read off
   probes/                 run-once diagnostics; each one's conclusion is frozen into config.py
   tests/                  186 tests, no weights, no GPU, ~7s
@@ -162,8 +161,7 @@ src/
   experiments.ipynb       historical, superseded by the scripts above
 ```
 
-`report.pdf` — the two-page write-up — is submitted alongside this repo and is not tracked
-here yet.
+`report.pdf` — submitted alongside this repo
 
 ### `src/runs/`
 
