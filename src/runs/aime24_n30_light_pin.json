@@ -62,13 +62,13 @@
    "file": "aime24_n30_light.jsonl",
    "device": "cuda",
    "gpu": "NVIDIA H100 80GB HBM3",
-   "records": 120
+   "records": 150
   },
   {
    "file": "aime24_n30_light.jsonl",
    "device": "cuda",
    "gpu": "NVIDIA H100 80GB HBM3",
-   "records": 30
+   "records": 20
   }
  ]
 }
