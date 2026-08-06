@@ -1,8 +1,14 @@
 {
  "model_revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+ "hardware": {
+  "device": "cuda",
+  "backend": "cuda",
+  "torch": "2.13.0+cu130",
+  "gpu": "NVIDIA GeForce RTX 5090"
+ },
  "dataset": {
   "rows": 30,
-  "fingerprint": "da3d76aafc9c50f1",
+  "fingerprint": "ebdf141b0f00f517",
   "download_size": 81670,
   "dataset": "aime24",
   "path": "HuggingFaceH4/aime_2024",
@@ -22,5 +28,13 @@
    21
   ],
   "content_sha256": "b7cdf9f997416b15"
- }
+ },
+ "hardware_history": [
+  {
+   "device": "cuda",
+   "backend": "cuda",
+   "torch": "2.13.0+cu130",
+   "gpu": "NVIDIA GeForce RTX 5090"
+  }
+ ]
 }

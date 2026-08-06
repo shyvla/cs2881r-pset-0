@@ -45,18 +45,23 @@ EXPLORATORY SUBSET (config.problem_ids(12), the set the band was chosen on)
 
 (.venv) shylan@Shylas-Macbook-Air src % python analyze.py --dataset math500
 /Users/shylan/VSCode/cs2881r-pset-0/src/runs/math500_n150_light.jsonl
-cells present: ['cot_intact', 'cot_random', 'direct_ablated', 'direct_intact', 'direct_random']
+cells present: ['cot_ablated', 'cot_intact', 'cot_random', 'direct_ablated', 'direct_intact', 'direct_random']
 dataset: math500 (assumed from --dataset; records carry no stamp)   split rows 500 (from /Users/shylan/VSCode/cs2881r-pset-0/src/runs/math500_n150_light_pin.json)
 
 cell                 n    acc  norm   composition
 cot_intact         150  94.0%     0   correct=141  incomplete=6  incorrect=3
+cot_ablated        150  88.0%     0   correct=132  incomplete=17  incorrect=1
 cot_random         150  96.0%     0   correct=144  incorrect=3  incomplete=3
 direct_intact      150  34.0%     0   incorrect=99  correct=51
 direct_ablated     150  30.7%     0   incorrect=104  correct=46
 direct_random      150  28.7%     0   incorrect=107  correct=43
 
 COT ARM   150 paired problems
+   ablated    88.0%   drop +6.0 pts   McNemar vs intact b=15  c=6  p=0.0783538818359375
    random     96.0%   drop -2.0 pts   McNemar vs intact b=2  c=5  p=0.453125
+   SELECTIVITY = (intact-ablated) - (intact-random) = random - ablated
+   point +8.0 pts   95% CI [+3.3, +13.3]   p=0.001   width 10.0 pts
+   CI EXCLUDES zero -- the SELECTION matters
 
 DIRECT ARM   150 paired problems
    ablated    30.7%   drop +3.3 pts   McNemar vs intact b=8  c=3  p=0.2265625
@@ -66,6 +71,7 @@ DIRECT ARM   150 paired problems
    CI includes zero -- no selectivity detected
 
 INTERACTION   150 problems in both arms
+   ablation        -2.7 pts   95% CI [-10.0, +4.7]   p=0.493   width 14.7
    random control  +7.3 pts   95% CI [+2.7, +12.7]   p=0.003   width 10.0
    A control interaction that is not ~0 means broad degradation, not
    a J-space effect. Read the two lines together or neither.
