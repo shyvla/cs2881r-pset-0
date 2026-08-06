@@ -176,25 +176,5 @@
    "torch": "2.13.0+cu130",
    "gpu": "NVIDIA GeForce RTX 4090"
   }
- ],
- "merged_from": [
-  {
-   "file": "gsm8k_n150_light.jsonl",
-   "device": "cuda",
-   "gpu": "NVIDIA GeForce RTX 4090",
-   "records": 600
-  },
-  {
-   "file": "gsm8k_n150_light_cot_random.jsonl",
-   "device": "cuda",
-   "gpu": "NVIDIA GeForce RTX 4090",
-   "records": 150
-  },
-  {
-   "file": "gsm8k_n150_light.jsonl",
-   "device": "cuda",
-   "gpu": "NVIDIA GeForce RTX 4090",
-   "records": 150
-  }
  ]
 }
