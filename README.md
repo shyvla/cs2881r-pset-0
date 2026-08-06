@@ -73,7 +73,7 @@ Full transcripts: [`src/data_analysis.md`](src/data_analysis.md). Figures:
 | dataset | n | CoT intact / ablated / random | Direct intact / ablated / random | selectivity (CoT arm) | interaction (ablation) | interaction (random control) |
 |---|---|---|---|---|---|---|
 | GSM8K | 150 | 80.7 / 74.7 / 76.7 | 27.3 / 24.7 / 24.7 | +2.0 [−3.3, +7.3] | **−3.3 [−10.7, +4.0]** | −1.3 [−7.3, +4.7] |
-| MATH-500 | 150 (level-balanced) | 94.0 / — / 96.0 | 34.0 / 30.7 / 28.7 | — | *pending* | **+7.3 [+2.7, +12.7]**, p=0.003 |
+| MATH-500 | 150 (level-balanced) | 94.0 / — / 96.0 | 34.0 / 30.7 / 28.7 | — | *regenerating, see below* | **+7.3 [+2.7, +12.7]**, p=0.003 |
 | AIME 2024 | 30 | 66.7 / 55.0 (n=20) / 73.3 | 0.0 / 0.0 / 0.0 | +20.0 [0.0, +40.0] | −20.0 [−40.0, +0.0] | 0.0 [−15.0, +15.0] |
 
 Accuracies in %, contrasts in percentage points with 95% paired-bootstrap CIs.
@@ -84,11 +84,43 @@ Accuracies in %, contrasts in percentage points with 95% paired-bootstrap CIs.
   arm, and the interaction points the *wrong way* (ablation cost CoT slightly more than
   direct) with a CI spanning zero. The random control is also ~0, so this is a null rather
   than a mess.
-* **MATH-500 is missing `cot_ablated`** (5 of 6 cells generated), so it has no ablation
-  interaction yet. What it *does* have is a random-control interaction that is
-  significantly non-zero — the quantity that is supposed to be ~0 is not — which on its own
-  says the direct arm degrades under *any* ten removed directions on this dataset. The
-  ablation interaction, when it lands, cannot be read without that beside it.
+* **MATH-500's `cot_ablated` cell was generated and then lost.** All 150 problems ran to
+  completion — 707 minutes of H100 time, ~283 s/problem — and I then destroyed the records
+  by accident before they were merged into `runs/math500_n150_light.jsonl`. Stupid, and
+  entirely my own doing: nothing about the pipeline or the gate is implicated. The cell is
+  being regenerated, and the records plus the updated analysis, table row and figures
+  **will be in this repo by noon on Thursday 6 August 2026**. Until then MATH-500 stands at
+  5 of 6 cells and has no ablation interaction.
+
+  <details>
+  <summary>Proof the run completed (terminal log, 2026-08-05 23:34)</summary>
+
+  <br>
+
+  <img src="figures/math500_cot_ablated_run_log.png" width="400"
+       alt="Terminal log of the completed MATH-500 cot_ablated run">
+
+  Tail of that log:
+
+  ```
+  cot_ablated      id=497   12259 tok   680.5s  mod=73902
+    cot_ablated: 150 problems in 707.0 min
+
+  per-generation seconds
+    cot_ablated        282.8 s  x150  generations
+    TOTAL              282.8 s/problem   -> 11.8 h at n=150
+  ```
+
+  The per-problem lines also corroborate the disclosed censoring: several problems
+  (ids 400, 416, 439, 477, 490, 491, 486) terminate at exactly `16384 tok`, i.e. on
+  MATH-500's committed CoT cap.
+
+  </details>
+
+* **MATH-500's random-control interaction is significantly non-zero** — the quantity that
+  is supposed to be ~0 is not — which on its own says the direct arm degrades under *any*
+  ten removed directions on this dataset. The regenerated ablation interaction cannot be
+  read without that beside it, and must not be read against zero.
 * **AIME 2024's `cot_ablated` cell is 20 of 30 problems because the pre-registered
   degeneration gate fired and stopped it**: 40% unusable against `cot_intact`'s 5%, a
   +35pt delta against a 15% threshold, with 8 cap hits at 32768 and 6 of those ending in
@@ -108,7 +140,7 @@ See [Disclosures](#disclosures) for the rest.
 
 ```
 CLOUD.md                  renting a GPU: install, cache, verify-before-you-pay, device rules
-figures/                  fig1_accuracy.png, fig2_contrasts.png
+figures/                  fig1_accuracy.png, fig2_contrasts.png, and the lost-run log screenshot
 requirements.txt          exact pins; two of them are load-bearing, see the comments
 src/
   config.py               THE PRE-REGISTRATION. Every fixed number, with its reasoning.
@@ -320,6 +352,13 @@ reasoning, in the file named.
   and the `incomplete` rate at it was unknowable in advance — it came out at 8 of the 20
   `cot_ablated` generations.
 * **AIME's `cot_ablated` cell is gate-stopped at 20/30**, as above.
+* **MATH-500's `cot_ablated` records were lost after a completed run** and are being
+  regenerated; due in this repo by noon on Thursday 6 August 2026. See
+  [Results so far](#results-so-far) for the log of the lost run. This is operator error, not
+  a pipeline or protocol failure, and the regenerated cell is the same pre-registered
+  condition at the same committed cap — but it *was* generated after the other five cells'
+  results were known, which is worth stating even though nothing about the cell is chosen
+  at run time.
 * **MATH-500's random-control interaction is significantly non-zero** (+7.3 pts, p=0.003),
   which is the signature of broad degradation rather than a J-space effect.
 * **One deliberate deviation from a literal reading of the paper**: the removed direction is

@@ -22,13 +22,16 @@ INK, MUTED, GRID = "#1a1a19", "#6b6a63", "#e5e4dd"
 
 STATES = ("intact", "ablated", "random")
 
-# dataset -> arm -> {state: (accuracy %, n)}
+# dataset -> arm -> {state: (accuracy %, n)}. None = cell not on disk.
 DATA = {
     "GSM8K (n=150)": {
         "CoT":    {"intact": (80.7, 150), "ablated": (74.7, 150), "random": (76.7, 150)},
         "Direct": {"intact": (27.3, 150), "ablated": (24.7, 150), "random": (24.7, 150)},
     },
-    # MATH-500 goes here when analyzed: "MATH-500 (n=150, level-balanced)": {...},
+    "MATH-500 (n=150, level-balanced)": {
+        "CoT":    {"intact": (94.0, 150), "ablated": None, "random": (96.0, 150)},
+        "Direct": {"intact": (34.0, 150), "ablated": (30.7, 150), "random": (28.7, 150)},
+    },
     "AIME 2024 (n=30)": {
         "CoT":    {"intact": (66.7, 30), "ablated": (55.0, 20), "random": (73.3, 30)},
         "Direct": {"intact": (0.0, 30),  "ablated": (0.0, 30),  "random": (0.0, 30)},
@@ -46,7 +49,12 @@ CONTRASTS = {
         ("Interaction (ablation)",     -3.3, -10.7,  4.0, C_INTACT),
         ("Interaction (random ctrl)",  -1.3,  -7.3,  4.7, C_RANDOM),
     ],
-    # "MATH-500": [...],
+    # CoT-arm selectivity and the ablation interaction await the re-run
+    # cot_ablated cell; only the estimable contrasts are shown.
+    "MATH-500": [
+        ("Selectivity, direct arm",    -2.0,  -6.7,  2.7, C_ABLATED),
+        ("Interaction (random ctrl)",   7.3,   2.7, 12.7, C_RANDOM),
+    ],
     "AIME 2024": [
         ("Selectivity, CoT arm",       20.0,   0.0, 40.0, C_ABLATED),
         ("Selectivity, direct arm",     0.0,   0.0,  0.0, C_ABLATED),
@@ -80,11 +88,15 @@ def fig_accuracy(outdir: Path):
         ax.yaxis.grid(True, color=GRID, linewidth=0.8)
         for gi, (arm, cells) in enumerate(arms.items()):
             for si, state in enumerate(STATES):
-                acc, n = cells[state]
                 x = gi + (si - 1) * (width + gap)
+                if cells[state] is None:
+                    ax.text(x, 2.5, "n/a", ha="center", va="bottom",
+                            fontsize=7.5, color=MUTED, rotation=90)
+                    continue
+                acc, n = cells[state]
                 ax.bar(x, acc, width=width, color=colors[state], zorder=3)
                 note = f"{acc:.0f}" if acc else "0"
-                if n != max(c[1] for c in cells.values()):
+                if n != max(c[1] for c in cells.values() if c):
                     note += f"*"
                 ax.text(x, acc + 1.5, note, ha="center", va="bottom",
                         fontsize=8, color=INK)
