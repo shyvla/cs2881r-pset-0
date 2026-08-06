@@ -1,3 +1,0 @@
-{"id": 0, "cond": "cot_intact", "outcome": "correct", "correct": 1, "extracted": "18", "gold": "18", "normalized": false, "n_tok": 1580, "hit_cap": false, "distinct10_body": 1.0, "distinct10_trace": 0.932, "n_word_trace": 967, "raw_sha": "f683730be4c5"}
-{"id": 0, "cond": "nothink_intact", "outcome": "correct", "correct": 1, "extracted": "18", "gold": "18", "normalized": false, "n_tok": 242, "hit_cap": false, "distinct10_body": 1.0, "distinct10_trace": 1.0, "n_word_trace": 0, "raw_sha": "080a46e0ac41"}
-{"id": 0, "cond": "direct_intact", "outcome": "incorrect", "correct": 0, "extracted": "26", "gold": "18", "normalized": false, "n_tok": 4, "hit_cap": false, "distinct10_body": 1.0, "distinct10_trace": 1.0, "n_word_trace": 0, "raw_sha": "4349d0e5dcc1"}

@@ -176,5 +176,19 @@
    "torch": "2.13.0+cu130",
    "gpu": "NVIDIA GeForce RTX 5090"
   }
+ ],
+ "merged_from": [
+  {
+   "file": "math500_n150_light.jsonl",
+   "device": "cuda",
+   "gpu": "NVIDIA GeForce RTX 5090",
+   "records": 750
+  },
+  {
+   "file": "math500_n150_light.jsonl",
+   "device": "cuda",
+   "gpu": "NVIDIA GeForce RTX 5090",
+   "records": 0
+  }
  ]
 }
